@@ -51,7 +51,12 @@ type GenerationLog = {
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
 const sizeOptions = ["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"].map((value) => ({ label: value, value }));
-const qualityOptions = ["auto", "low", "medium", "high"].map((value) => ({ label: value, value }));
+const qualityOptions = [
+    { label: "auto", value: "auto" },
+    { label: "low / 1K", value: "low" },
+    { label: "medium / 2K", value: "medium" },
+    { label: "high / 4K", value: "high" },
+];
 const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
 const LOG_STORE_PREFIX = `${LOG_STORE_KEY}:`;
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });

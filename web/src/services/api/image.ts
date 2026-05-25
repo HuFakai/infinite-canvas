@@ -18,6 +18,37 @@ type ImageApiResponse = {
     msg?: string;
 };
 
+const QUALITY_BASE: Record<string, number> = {
+    low: 1024,
+    medium: 2048,
+    high: 2880,
+};
+
+/** Map "quality + ratio" to an explicit pixel dimension like "3840x2160". Returns undefined when quality is auto. */
+function resolveSize(quality: string, ratio: string): string | undefined {
+    const basePixels = QUALITY_BASE[quality];
+    if (!basePixels || ratio === "auto" || !ratio) return undefined;
+
+    const parts = ratio.split(":");
+    if (parts.length !== 2) return undefined;
+    const w = Number(parts[0]);
+    const h = Number(parts[1]);
+    if (!w || !h) return undefined;
+
+    const targetPixels = basePixels * basePixels;
+    const isLandscape = w >= h;
+    const longRatio = isLandscape ? w / h : h / w;
+
+    const longSideRaw = Math.sqrt(targetPixels * longRatio);
+    const longSide = Math.floor(longSideRaw / 16) * 16;
+    const shortSide = Math.round((longSide / longRatio) / 16) * 16;
+
+    const width = isLandscape ? longSide : shortSide;
+    const height = isLandscape ? shortSide : longSide;
+
+    return `${width}x${height}`;
+}
+
 function resolveImageDataUrl(item: Record<string, unknown>) {
     if (typeof item.b64_json === "string" && item.b64_json) {
         return `data:image/png;base64,${item.b64_json}`;
@@ -94,6 +125,7 @@ function withSystemMessage(config: AiConfig, messages: ChatCompletionMessage[]) 
 
 export async function requestGeneration(config: AiConfig, prompt: string) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const pixelSize = resolveSize(config.quality, config.size);
     try {
         const response = await axios.post<ImageApiResponse>(
             aiApiUrl(config, "/images/generations"),
@@ -101,8 +133,7 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
                 model: config.model,
                 prompt: withSystemPrompt(config, prompt),
                 n,
-                quality: config.quality || undefined,
-                size: config.size || undefined,
+                ...(pixelSize ? { quality: config.quality, size: pixelSize } : {}),
                 response_format: "b64_json",
             },
             {
@@ -117,16 +148,15 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[]) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const pixelSize = resolveSize(config.quality, config.size);
     const formData = new FormData();
     formData.set("model", config.model);
     formData.set("prompt", withSystemPrompt(config, prompt));
     formData.set("n", String(n));
     formData.set("response_format", "b64_json");
-    if (config.quality) {
+    if (pixelSize) {
         formData.set("quality", config.quality);
-    }
-    if (config.size) {
-        formData.set("size", config.size);
+        formData.set("size", pixelSize);
     }
     const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
     files.forEach((file) => formData.append("image", file));
