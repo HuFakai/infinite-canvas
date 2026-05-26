@@ -6,6 +6,7 @@ import { Button, Input } from "antd";
 
 import { useCanvasStore, type CanvasProject } from "../stores/use-canvas-store";
 import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
+import { exportCanvasProjects } from "../utils/canvas-export";
 
 export function CanvasProjectCard({ project }: { project: CanvasProject }) {
     const router = useRouter();
@@ -65,7 +66,7 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
                         </>
                     ) : (
                         <>
-                            <Button type="text" size="small" shape="circle" icon={<Download className="size-4" />} onClick={() => exportProject(project)} aria-label="导出" />
+                            <Button type="text" size="small" shape="circle" icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects([project], project.title || "无限画布")} aria-label="导出" />
                             <Button type="text" size="small" shape="circle" icon={<Pencil className="size-4" />} onClick={() => startEditing(project.id, project.title)} aria-label="重命名" />
                             <Button type="text" size="small" shape="circle" icon={<Trash2 className="size-4" />} onClick={() => setDeleteIds([project.id])} aria-label="删除" />
                         </>
@@ -74,14 +75,4 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
             </div>
         </article>
     );
-}
-
-function exportProject(project: CanvasProject) {
-    const data = { app: "infinite-canvas", version: 1, exportedAt: new Date().toISOString(), project };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${(project.title || "无限画布").replace(/[\\/:*?"<>|]/g, "_")}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
 }

@@ -38,6 +38,17 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
     return url;
 }
 
+export async function getImageBlob(storageKey: string) {
+    return store.getItem<Blob>(storageKey);
+}
+
+export async function setImageBlob(storageKey: string, blob: Blob) {
+    await store.setItem(storageKey, blob);
+    const url = URL.createObjectURL(blob);
+    objectUrls.set(storageKey, url);
+    return url;
+}
+
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
     const url = image.dataUrl || (await resolveImageUrl(image.storageKey, image.url || ""));
     if (!url || url.startsWith("data:")) return url;

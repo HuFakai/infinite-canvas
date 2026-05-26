@@ -29,6 +29,17 @@ export async function resolveMediaUrl(storageKey?: string, fallback = "") {
     return url;
 }
 
+export async function getMediaBlob(storageKey: string) {
+    return store.getItem<Blob>(storageKey);
+}
+
+export async function setMediaBlob(storageKey: string, blob: Blob) {
+    await store.setItem(storageKey, blob);
+    const url = URL.createObjectURL(blob);
+    objectUrls.set(storageKey, url);
+    return url;
+}
+
 export async function cleanupUnusedMedia(usedData: unknown) {
     const usedKeys = collectMediaStorageKeys(usedData);
     const unused: string[] = [];

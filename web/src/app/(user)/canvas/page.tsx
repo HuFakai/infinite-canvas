@@ -3,19 +3,17 @@
 import { useRef } from "react";
 import { useRouter } from "next/navigation";
 import { App, Button } from "antd";
-import { FileUp, Plus } from "lucide-react";
+import { Download, FileUp, Plus } from "lucide-react";
 
+import { readZip } from "@/lib/zip";
+import { setMediaBlob } from "@/services/file-storage";
+import { setImageBlob } from "@/services/image-storage";
 import { CanvasDeleteProjectsDialog } from "./components/canvas-delete-projects-dialog";
 import { CanvasProjectCard } from "./components/canvas-project-card";
-import { useCanvasStore, type CanvasProject } from "./stores/use-canvas-store";
+import type { CanvasExportFile } from "./export-types";
+import { useCanvasStore } from "./stores/use-canvas-store";
 import { useCanvasUiStore } from "./stores/use-canvas-ui-store";
-
-type CanvasExportFile = {
-    app: "infinite-canvas";
-    version: number;
-    exportedAt: string;
-    project: CanvasProject;
-};
+import { exportCanvasProjects } from "./utils/canvas-export";
 
 export default function CanvasPage() {
     const { message } = App.useApp();
@@ -35,11 +33,24 @@ export default function CanvasPage() {
     const importCanvas = async (file?: File) => {
         if (!file) return;
         try {
-            const data = JSON.parse(await file.text()) as CanvasExportFile;
-            enterProject(importProject(data.project));
-            message.success("画布已导入");
+            const zip = await readZip(file);
+            const projectFile = zip.get("projects.json");
+            if (!projectFile) throw new Error("missing projects.json");
+            const data = JSON.parse(await projectFile.text()) as CanvasExportFile;
+            await Promise.all(
+                data.projects.flatMap((project) =>
+                    project.files.map(async (item) => {
+                        const blob = zip.get(item.path);
+                        if (!blob) return;
+                        const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
+                        await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
+                    }),
+                ),
+            );
+            data.projects.forEach((item) => importProject(item.project));
+            message.success(`已导入 ${data.projects.length} 个画布`);
         } catch {
-            message.error("导入失败，请选择有效的 JSON 文件");
+            message.error("导入失败，请选择有效的画布压缩包");
         } finally {
             if (inputRef.current) inputRef.current.value = "";
         }
@@ -55,9 +66,14 @@ export default function CanvasPage() {
                     </div>
                     <div className="flex items-center gap-2">
                         {selectedIds.length ? (
-                            <Button disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>
-                                删除选中
-                            </Button>
+                            <>
+                                <Button disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `无限画布-${selectedIds.length}个项目`)}>
+                                    导出选中
+                                </Button>
+                                <Button disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>
+                                    删除选中
+                                </Button>
+                            </>
                         ) : null}
                         {projects.length ? (
                             <Button disabled={!hydrated} onClick={() => setDeleteIds(projects.map((project) => project.id))}>
@@ -92,7 +108,7 @@ export default function CanvasPage() {
                 )}
             </div>
 
-            <input ref={inputRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => void importCanvas(event.target.files?.[0])} />
+            <input ref={inputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importCanvas(event.target.files?.[0])} />
             <CanvasDeleteProjectsDialog />
         </main>
     );
