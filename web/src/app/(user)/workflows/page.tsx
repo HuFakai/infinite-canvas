@@ -143,7 +143,7 @@ export default function WorkflowsPage() {
             setWorkflows(stored.map(normalizeWorkflow).sort((a, b) => b.updatedAt - a.updatedAt));
             return;
         }
-        const seed = [createStarterWorkflow()];
+        const seed = [createStarterWorkflow(effectiveConfig)];
         setWorkflows(seed);
         await workflowStore.setItem(WORKFLOW_STORE_KEY, seed);
     };
@@ -207,8 +207,9 @@ export default function WorkflowsPage() {
             message.error(`请填写 ${missing.label}`);
             return;
         }
-        const model = runningWorkflow.config.imageModel || runningWorkflow.config.model || effectiveConfig.imageModel || effectiveConfig.model;
-        const runConfig = buildRunConfig(effectiveConfig, runningWorkflow.config, model);
+        const runtime = resolveWorkflowRuntime(runningWorkflow, effectiveConfig);
+        const model = runtime.model;
+        const runConfig = buildRunConfig(effectiveConfig, runningWorkflow.config, runtime);
         if (!isAiConfigReady(runConfig, model)) {
             message.warning("请先完成 API 配置");
             openConfigDialog(true);
@@ -242,7 +243,7 @@ export default function WorkflowsPage() {
             const log = buildImageHistoryLog({
                 workflow: runningWorkflow,
                 prompt: renderedPrompt,
-                config: runningWorkflow.config,
+                config: { ...runningWorkflow.config, model, imageModel: model, apiMode: runtime.apiMode },
                 model,
                 images: storedImages,
                 durationMs,
@@ -377,8 +378,8 @@ export default function WorkflowsPage() {
                                 <Typography.Paragraph className="!mb-0 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-md bg-stone-100 p-3 text-sm dark:bg-stone-950">{renderedPrompt || "填写变量后会在这里预览最终提示词"}</Typography.Paragraph>
                             </div>
                             <div className="grid grid-cols-2 gap-2 text-xs text-stone-500 dark:text-stone-400">
-                                <InfoPill label="模型" value={runningWorkflow.config.imageModel || runningWorkflow.config.model || effectiveConfig.imageModel || effectiveConfig.model} />
-                                <InfoPill label="接口" value={runningWorkflow.config.apiMode === "responses" ? "Responses" : "Images"} />
+                                <InfoPill label="模型" value={resolveWorkflowRuntime(runningWorkflow, effectiveConfig).model} />
+                                <InfoPill label="接口" value={resolveWorkflowRuntime(runningWorkflow, effectiveConfig).apiMode === "responses" ? "Responses" : "Images"} />
                                 <InfoPill label="尺寸" value={runningWorkflow.config.size || effectiveConfig.size} />
                                 <InfoPill label="数量" value={`${runningWorkflow.config.count || "1"} 张`} />
                             </div>
@@ -584,7 +585,7 @@ function createBlankWorkflow(config: AiConfig): CreativeWorkflow {
     });
 }
 
-function createStarterWorkflow(): CreativeWorkflow {
+function createStarterWorkflow(config: AiConfig): CreativeWorkflow {
     const now = Date.now();
     return normalizeWorkflow({
         id: nanoid(),
@@ -593,7 +594,7 @@ function createStarterWorkflow(): CreativeWorkflow {
         description: "固定海报构图、商业摄影质感和营销文案结构，只替换产品与卖点。",
         variables: [createVariable("product_name", "产品名称"), createVariable("selling_points", "核心卖点", "textarea"), createVariable("campaign", "活动信息")],
         config: {
-            ...createWorkflowConfig(defaultConfig),
+            ...createWorkflowConfig(config),
             promptTemplate: "为 {{product_name}} 生成一张高端电商海报。\n核心卖点：{{selling_points}}\n活动信息：{{campaign}}\n要求：主体清晰、构图高级、商品有强烈质感，画面适合社交媒体和电商首图。",
         },
         createdAt: now,
@@ -656,12 +657,23 @@ function renderWorkflowPrompt(workflow: CreativeWorkflow, values: Record<string,
     return negativePrompt ? `${prompt}\n\n避免：${negativePrompt}` : prompt;
 }
 
-function buildRunConfig(baseConfig: AiConfig, workflowConfig: WorkflowGenerationConfig, model: string): AiConfig {
+function resolveWorkflowRuntime(workflow: CreativeWorkflow, baseConfig: AiConfig) {
+    const workflowModel = workflow.config.imageModel || workflow.config.model;
+    const fallbackModel = baseConfig.imageModel || baseConfig.model;
+    if (!workflowModel) return { model: fallbackModel, apiMode: baseConfig.apiMode };
+    if (baseConfig.channelMode === "remote" && baseConfig.models.length && !baseConfig.models.includes(workflowModel)) {
+        return { model: fallbackModel, apiMode: baseConfig.apiMode };
+    }
+    return { model: workflowModel, apiMode: workflow.config.apiMode || baseConfig.apiMode };
+}
+
+function buildRunConfig(baseConfig: AiConfig, workflowConfig: WorkflowGenerationConfig, runtime: { model: string; apiMode: AiConfig["apiMode"] }): AiConfig {
     return {
         ...baseConfig,
         ...workflowConfig,
-        model,
-        imageModel: model,
+        model: runtime.model,
+        imageModel: runtime.model,
+        apiMode: runtime.apiMode,
         systemPrompt: workflowConfig.systemPrompt || baseConfig.systemPrompt,
         count: workflowConfig.count || "1",
     };
