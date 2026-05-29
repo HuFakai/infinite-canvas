@@ -158,15 +158,30 @@ function parseImagePayload(payload: ImageApiResponse, mime: string): GeneratedIm
     return images;
 }
 
+function getStringRecordValue(record: Record<string, unknown>, key: string) {
+    const value = record[key];
+    return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function collectResponsesImageStrings(value: unknown, depth = 0): string[] {
+    if (depth > 5 || value == null) return [];
+    if (typeof value === "string") return value.trim() ? [value.trim()] : [];
+    if (Array.isArray(value)) return value.flatMap((item) => collectResponsesImageStrings(item, depth + 1));
+    if (typeof value !== "object") return [];
+    const record = value as Record<string, unknown>;
+    return ["result", "b64_json", "base64", "image", "image_data", "data", "partial_image_b64"].flatMap((key) => collectResponsesImageStrings(record[key], depth + 1));
+}
+
 function getResponsesImageResultBase64(result: unknown) {
-    if (typeof result === "string") return result.trim();
-    if (!result || typeof result !== "object" || Array.isArray(result)) return "";
-    const record = result as Record<string, unknown>;
-    for (const key of ["b64_json", "base64", "image", "data"]) {
-        const value = record[key];
-        if (typeof value === "string" && value.trim()) return value.trim();
-    }
-    return "";
+    return collectResponsesImageStrings(result)[0] || "";
+}
+
+function collectResponsesImageBase64(item: Record<string, unknown>) {
+    const values: string[] = [];
+    const result = getResponsesImageResultBase64(item.result);
+    if (result) values.push(result);
+    values.push(...collectResponsesImageStrings(item));
+    return Array.from(new Set(values));
 }
 
 function parseResponsesPayload(payload: ResponsesApiResponse, mime: string): GeneratedImage[] {
@@ -176,7 +191,7 @@ function parseResponsesPayload(payload: ResponsesApiResponse, mime: string): Gen
     const images =
         payload.output
             ?.filter((item) => item.type === "image_generation_call")
-            .map((item) => getResponsesImageResultBase64(item.result))
+            .flatMap((item) => collectResponsesImageBase64(item))
             .filter(Boolean)
             .map((b64) => ({ id: nanoid(), dataUrl: normalizeBase64Image(b64, mime) })) || [];
 
@@ -294,7 +309,13 @@ async function parseImagesStreamResponse(response: Response, mime: string): Prom
 async function parseResponsesStreamResponse(response: Response, mime: string): Promise<GeneratedImage[]> {
     let completedPayload: ResponsesApiResponse | null = null;
     const output: Record<string, unknown>[] = [];
+    const partialImages: string[] = [];
     await readJsonServerSentEvents(response, (event) => {
+        if (event.type === "response.image_generation_call.partial_image") {
+            const b64 = getStringRecordValue(event, "partial_image_b64");
+            if (b64) partialImages.push(b64);
+            return;
+        }
         const responsePayload = event.response;
         if (responsePayload && typeof responsePayload === "object" && !Array.isArray(responsePayload)) {
             completedPayload = responsePayload as ResponsesApiResponse;
@@ -304,7 +325,13 @@ async function parseResponsesStreamResponse(response: Response, mime: string): P
             output.push(item as Record<string, unknown>);
         }
     });
-    return parseResponsesPayload(completedPayload || { output }, mime);
+    try {
+        return parseResponsesPayload(completedPayload || { output }, mime);
+    } catch (error) {
+        if (!partialImages.length) throw error;
+        const lastPartialImage = partialImages[partialImages.length - 1];
+        return [{ id: nanoid(), dataUrl: normalizeBase64Image(lastPartialImage, mime) }];
+    }
 }
 
 function parseStreamChunk(chunk: string, onDelta: (value: string) => void) {
