@@ -330,8 +330,10 @@ docker run --rm golang:1.25-alpine sh -c 'GOPROXY=https://goproxy.cn,direct go e
 通常是服务器访问 Debian 官方源 `deb.debian.org` 很慢。当前 Dockerfile 已将运行镜像的 apt 源默认切换为阿里云镜像：
 
 ```dockerfile
-ARG DEBIAN_MIRROR=https://mirrors.aliyun.com
+ARG DEBIAN_MIRROR=http://mirrors.aliyun.com
 ```
+
+这里故意使用 `http`，因为 `node:22-bookworm-slim` 在安装 `ca-certificates` 前可能还没有系统证书，使用 `https` 源会先触发证书校验失败。
 
 拉取最新代码后重新构建即可：
 
@@ -350,7 +352,7 @@ docker compose up -d
 如果你所在服务器访问阿里云镜像也慢，可以临时换成清华源构建：
 
 ```bash
-docker compose build --build-arg DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn --progress=plain
+docker compose build --build-arg DEBIAN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn --progress=plain
 docker compose up -d
 ```
 

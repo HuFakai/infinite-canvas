@@ -28,7 +28,7 @@ RUN go build -o /server .
 # 运行镜像：Next.js 对外监听 13000，Go 只在容器内部监听 18080。
 FROM node:22-bookworm-slim
 
-ARG DEBIAN_MIRROR=https://mirrors.aliyun.com
+ARG DEBIAN_MIRROR=http://mirrors.aliyun.com
 WORKDIR /app
 COPY VERSION /app/VERSION
 COPY CHANGELOG.md /app/CHANGELOG.md
