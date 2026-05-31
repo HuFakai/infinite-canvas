@@ -46,6 +46,9 @@ func New() *gin.Engine {
 	v1.POST("/user-data/canvas", gin.WrapF(handler.SaveUserCanvasData))
 	v1.GET("/user-data/image-history", gin.WrapF(handler.UserImageHistory))
 	v1.POST("/user-data/image-history", gin.WrapF(handler.SaveUserImageHistory))
+	v1.GET("/user-data/assets", gin.WrapF(handler.UserAssetData))
+	v1.POST("/user-data/assets", gin.WrapF(handler.SaveUserAssetData))
+	v1.POST("/ai-logs", gin.WrapF(handler.ClientAICallLog))
 	v1.GET("/workflows", gin.WrapF(handler.UserWorkflows))
 	v1.POST("/workflows", gin.WrapF(handler.SaveUserWorkflow))
 	v1.POST("/workflows/agent-draft", gin.WrapF(handler.DraftUserWorkflow))
@@ -77,6 +80,8 @@ func New() *gin.Engine {
 	admin.DELETE("/credit-logs/:id", func(c *gin.Context) {
 		handler.AdminDeleteCreditLog(c.Writer, c.Request, c.Param("id"))
 	})
+	admin.GET("/ai-logs", gin.WrapF(handler.AdminAICallLogs))
+	admin.DELETE("/ai-logs", gin.WrapF(handler.AdminDeleteAICallLogs))
 	admin.GET("/settings", gin.WrapF(handler.AdminSettings))
 	admin.POST("/settings", gin.WrapF(handler.AdminSaveSettings))
 	admin.POST("/settings/channel-models", gin.WrapF(handler.AdminChannelModels))

@@ -39,7 +39,16 @@ type PublicModelChannelSetting struct {
 	DefaultVideoModel  string                   `json:"defaultVideoModel"`
 	DefaultTextModel   string                   `json:"defaultTextModel"`
 	SystemPrompt       string                   `json:"systemPrompt"`
+	SystemPrompts      SystemPromptSetting      `json:"systemPrompts"`
 	AllowCustomChannel *bool                    `json:"allowCustomChannel"`
+}
+
+type SystemPromptSetting struct {
+	Image         string `json:"image"`
+	Video         string `json:"video"`
+	Text          string `json:"text"`
+	Workflow      string `json:"workflow"`
+	WorkflowAgent string `json:"workflowAgent"`
 }
 
 type PublicModelChannelInfo struct {
@@ -78,8 +87,19 @@ type PublicLinuxDoAuthSetting struct {
 type PrivateSetting struct {
 	Channels   []ModelChannel        `json:"channels"`
 	PromptSync PromptSyncSetting     `json:"promptSync"`
+	AILog      AILogSetting          `json:"aiLog"`
 	Auth       PrivateAuthSetting    `json:"auth"`
 	Storage    PrivateStorageSetting `json:"storage"`
+}
+
+type AILogSetting struct {
+	Cleanup AILogCleanupSetting `json:"cleanup"`
+}
+
+type AILogCleanupSetting struct {
+	Enabled       *bool  `json:"enabled"`
+	RetentionDays int    `json:"retentionDays"`
+	Cron          string `json:"cron"`
 }
 
 type PrivateStorageSetting struct {

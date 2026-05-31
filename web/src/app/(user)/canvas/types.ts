@@ -31,6 +31,9 @@ export type CanvasNodeMetadata = {
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;
     model?: string;
+    imageChannelId?: string;
+    videoChannelId?: string;
+    textChannelId?: string;
     size?: string;
     quality?: string;
     outputFormat?: "png" | "jpeg" | "webp";

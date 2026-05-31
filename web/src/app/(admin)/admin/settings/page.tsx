@@ -35,12 +35,13 @@ const emptySettings: AdminSettings = {
             defaultVideoModel: "",
             defaultTextModel: "",
             systemPrompt: "",
+            systemPrompts: { image: "", video: "", text: "", workflow: "", workflowAgent: "" },
             allowCustomChannel: true,
         },
         auth: { allowRegister: true, linuxDo: { enabled: false } },
         storage: { mode: "local_indexeddb", allowUserProvider: false },
     },
-    private: { channels: [], promptSync: { enabled: true, cron: "*/5 * * * *" }, auth: { linuxDo: { clientId: "", clientSecret: "" } }, storage: { mode: "local_indexeddb", allowUserProvider: false, providers: [], roundRobinCursor: 0, capacityCheck: { enabled: false, cron: "0 */6 * * *" }, capacityLimitBytes: 9 * 1024 * 1024 * 1024 } },
+    private: { channels: [], promptSync: { enabled: true, cron: "*/5 * * * *" }, aiLog: { cleanup: { enabled: false, retentionDays: 14, cron: "0 3 * * *" } }, auth: { linuxDo: { clientId: "", clientSecret: "" } }, storage: { mode: "local_indexeddb", allowUserProvider: false, providers: [], roundRobinCursor: 0, capacityCheck: { enabled: false, cron: "0 */6 * * *" }, capacityLimitBytes: 9 * 1024 * 1024 * 1024 } },
 };
 const emptyChannel: AdminModelChannel = { id: "", protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, timeout: 600, enabled: true, remark: "" };
 const emptyStorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "images", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
@@ -375,7 +376,7 @@ export default function AdminSettingsPage() {
     }
 
     return (
-        <main style={{ padding: 24 }}>
+        <main className="p-3 md:p-6">
             <Flex vertical gap={16}>
                 <Card variant="borderless">
                     <Flex justify="space-between" align="center" gap={16} wrap>
@@ -456,8 +457,36 @@ export default function AdminSettingsPage() {
                                         </Form.Item>
                                     </Col>
                                     <Col span={24}>
-                                        <Form.Item name={["public", "modelChannel", "systemPrompt"]} label="系统提示词">
-                                            <Input.TextArea rows={4} />
+                                        <Typography.Title level={5}>内置/系统提示词</Typography.Title>
+                                        <Row gutter={16}>
+                                            <Col xs={24} md={12}>
+                                                <Form.Item name={["public", "modelChannel", "systemPrompts", "image"]} label="生图系统提示词">
+                                                    <Input.TextArea rows={4} placeholder="会自动追加在生图提示词前，不在输入框中展示" />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={12}>
+                                                <Form.Item name={["public", "modelChannel", "systemPrompts", "video"]} label="视频系统提示词">
+                                                    <Input.TextArea rows={4} placeholder="会自动追加在视频提示词前" />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={12}>
+                                                <Form.Item name={["public", "modelChannel", "systemPrompts", "text"]} label="文本/问答系统提示词">
+                                                    <Input.TextArea rows={4} placeholder="用于画布问答、AI 文本等文本模型调用" />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={12}>
+                                                <Form.Item name={["public", "modelChannel", "systemPrompts", "workflow"]} label="工作流运行系统提示词">
+                                                    <Input.TextArea rows={4} placeholder="用于工作流运行时补充统一创作要求" />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24}>
+                                                <Form.Item name={["public", "modelChannel", "systemPrompts", "workflowAgent"]} label="工作流创建 Agent 系统提示词">
+                                                    <Input.TextArea rows={6} placeholder="控制 AI 创建工作流的输出规范和默认参数" />
+                                                </Form.Item>
+                                            </Col>
+                                        </Row>
+                                        <Form.Item name={["public", "modelChannel", "systemPrompt"]} hidden>
+                                            <Input />
                                         </Form.Item>
                                     </Col>
                                     <Col span={24}>
@@ -558,6 +587,25 @@ export default function AdminSettingsPage() {
                                         <Col xs={24} md={16}>
                                             <Form.Item name={["private", "promptSync", "cron"]} label="Cron 表达式" extra="默认每 5 分钟同步内置 GitHub 远程提示词源">
                                                 <Input placeholder="*/5 * * * *" />
+                                            </Form.Item>
+                                        </Col>
+                                    </Row>
+                                </Card>
+                                <Card size="small" title="AI 调用日志">
+                                    <Row gutter={16}>
+                                        <Col xs={24} md={8}>
+                                            <Form.Item name={["private", "aiLog", "cleanup", "enabled"]} label="开启自动清理" valuePropName="checked" extra="日志按天写入本地文件，不保存到 SQLite。">
+                                                <Switch />
+                                            </Form.Item>
+                                        </Col>
+                                        <Col xs={24} md={8}>
+                                            <Form.Item name={["private", "aiLog", "cleanup", "retentionDays"]} label="保留天数" extra="默认保留 14 天，超过后定时删除对应日期日志文件。">
+                                                <InputNumber min={1} precision={0} className="!w-full" />
+                                            </Form.Item>
+                                        </Col>
+                                        <Col xs={24} md={8}>
+                                            <Form.Item name={["private", "aiLog", "cleanup", "cron"]} label="清理 Cron">
+                                                <Input placeholder="0 3 * * *" />
                                             </Form.Item>
                                         </Col>
                                     </Row>
@@ -986,6 +1034,14 @@ function normalizePublicSetting(setting: Partial<AdminSettings["public"]> = {}):
             availableModels: setting.modelChannel?.availableModels || [],
             modelCosts: normalizeModelCosts(setting.modelChannel?.modelCosts || []),
             channels: setting.modelChannel?.channels || [],
+            systemPrompts: {
+                ...emptySettings.public.modelChannel.systemPrompts,
+                image: setting.modelChannel?.systemPrompts?.image || setting.modelChannel?.systemPrompt || "",
+                video: setting.modelChannel?.systemPrompts?.video || "",
+                text: setting.modelChannel?.systemPrompts?.text || setting.modelChannel?.systemPrompt || "",
+                workflow: setting.modelChannel?.systemPrompts?.workflow || "",
+                workflowAgent: setting.modelChannel?.systemPrompts?.workflowAgent || "",
+            },
         },
         auth: {
             allowRegister: setting.auth?.allowRegister !== false,
@@ -1010,6 +1066,13 @@ function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}
         promptSync: {
             enabled: setting.promptSync?.enabled !== false,
             cron: setting.promptSync?.cron || "*/5 * * * *",
+        },
+        aiLog: {
+            cleanup: {
+                enabled: setting.aiLog?.cleanup?.enabled === true,
+                retentionDays: Number(setting.aiLog?.cleanup?.retentionDays) || 14,
+                cron: setting.aiLog?.cleanup?.cron || "0 3 * * *",
+            },
         },
         auth: {
             linuxDo: {
@@ -1159,6 +1222,7 @@ async function collectSettings(form: any, editorMode: Record<SettingsTabKey, Edi
         values.private = privateSetting;
     }
     values.public.modelChannel.availableModels = filterModels(values.public.modelChannel.availableModels, collectChannelModels(values.private.channels));
+    values.public.modelChannel.systemPrompt = values.public.modelChannel.systemPrompts.image || values.public.modelChannel.systemPrompts.text || "";
     return normalizeSettings(values);
 }
 

@@ -115,7 +115,7 @@ export default function AdminAssetsPage() {
     ];
 
     return (
-        <main style={{ padding: 24 }}>
+        <main className="p-3 md:p-6">
             <Flex vertical gap={16}>
                 <Card variant="borderless">
                     <Form layout="vertical">
@@ -163,6 +163,7 @@ export default function AdminAssetsPage() {
                     search={false}
                     defaultSize="middle"
                     tableLayout="fixed"
+                    scroll={{ x: 1120 }}
                     cardProps={{ variant: "borderless" }}
                     headerTitle={
                         <Space>

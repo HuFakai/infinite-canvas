@@ -55,12 +55,18 @@ export function AppConfigModal() {
             .catch(() => {});
     }, [isConfigOpen, token, updateConfig]);
 
-    const finishConfig = () => {
+    const finishConfig = async () => {
         if (allowUserStorageProvider) saveUserStorageProvider(userStorage);
         setConfigDialogOpen(false);
         if (effectiveMode === "local" && (!config.baseUrl.trim() || !config.apiKey.trim())) return;
         if (!modelConfig.imageModel.trim() || !modelConfig.videoModel.trim() || !modelConfig.textModel.trim()) return;
         if (!allowCustomChannel && config.channelMode !== "remote") updateConfig("channelMode", "remote");
+        if (token && config.syncModelConfig) {
+            await syncUserModelConfig(token, config).catch((error) => message.warning(error instanceof Error ? `模型配置同步失败：${error.message}` : "模型配置同步失败"));
+        }
+        if (token && allowUserStorageProvider && config.syncStorageConfig) {
+            await syncUserStorageProvider(token, userStorage).catch((error) => message.warning(error instanceof Error ? `S3/R2 配置同步失败：${error.message}` : "S3/R2 配置同步失败"));
+        }
         message.success(shouldPromptContinue ? "配置已保存，请继续刚才的请求" : "配置已保存");
         clearPromptContinue();
     };
@@ -258,10 +264,9 @@ export function AppConfigModal() {
                                     <div className="text-sm font-medium">模型列表</div>
                                     <div className="mt-1 text-xs text-stone-500">当前已保存 {config.models.length} 个模型</div>
                                 </div>
-                                <div className="flex shrink-0 gap-2">
-                                    <Button size="small" loading={syncingModel} onClick={() => void syncModelConfig()}>
-                                        同步模型配置
-                                    </Button>
+                                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                                    <span className="text-xs text-stone-500">自动同步</span>
+                                    <Switch size="small" checked={config.syncModelConfig} onChange={(checked) => updateConfig("syncModelConfig", checked)} />
                                     <Button size="small" loading={loadingModels} onClick={() => void refreshModels()}>
                                         拉取全部渠道
                                     </Button>
@@ -338,13 +343,12 @@ export function AppConfigModal() {
                                     <div className="text-sm font-medium">用户 S3/R2 存储</div>
                                     <div className="mt-1 text-xs text-stone-500">开启后，新生成图片会优先保存到你自己的 S3 兼容对象存储。{storageUsageText ? `当前容量：${storageUsageText}` : ""}</div>
                                 </div>
-                                <div className="flex shrink-0 items-center gap-2">
+                                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                                     <Button size="small" loading={measuringStorage} onClick={() => void measureStorage()}>
                                         统计容量
                                     </Button>
-                                    <Button size="small" loading={syncingStorage} onClick={() => void syncStorageConfig()}>
-                                        同步
-                                    </Button>
+                                    <span className="text-xs text-stone-500">自动同步</span>
+                                    <Switch size="small" checked={config.syncStorageConfig} onChange={(checked) => updateConfig("syncStorageConfig", checked)} />
                                     <Switch checked={userStorage.enabled} onChange={(enabled) => setUserStorage((value) => ({ ...value, enabled }))} />
                                 </div>
                             </div>

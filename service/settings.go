@@ -47,6 +47,7 @@ func SaveSettings(settings model.Settings) (model.Settings, error) {
 	if err == nil {
 		RefreshPromptSyncScheduler()
 		RefreshStorageCapacityScheduler()
+		RefreshAILogCleanupScheduler()
 	}
 	return hidePrivateAPIKeys(result), err
 }
@@ -82,6 +83,21 @@ func normalizePublicSetting(setting model.PublicSetting) model.PublicSetting {
 	}
 	if setting.ModelChannel.Channels == nil {
 		setting.ModelChannel.Channels = []model.PublicModelChannelInfo{}
+	}
+	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.Image) == "" {
+		setting.ModelChannel.SystemPrompts.Image = firstNonEmpty(setting.ModelChannel.SystemPrompt, DefaultSystemPrompts().Image)
+	}
+	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.Video) == "" {
+		setting.ModelChannel.SystemPrompts.Video = DefaultSystemPrompts().Video
+	}
+	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.Text) == "" {
+		setting.ModelChannel.SystemPrompts.Text = firstNonEmpty(setting.ModelChannel.SystemPrompt, DefaultSystemPrompts().Text)
+	}
+	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.Workflow) == "" {
+		setting.ModelChannel.SystemPrompts.Workflow = DefaultSystemPrompts().Workflow
+	}
+	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.WorkflowAgent) == "" {
+		setting.ModelChannel.SystemPrompts.WorkflowAgent = DefaultSystemPrompts().WorkflowAgent
 	}
 	for i := range setting.ModelChannel.ModelCosts {
 		setting.ModelChannel.ModelCosts[i].Model = strings.TrimSpace(setting.ModelChannel.ModelCosts[i].Model)
@@ -122,6 +138,7 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 		setting.Channels = []model.ModelChannel{}
 	}
 	setting.PromptSync = normalizePromptSyncSetting(setting.PromptSync)
+	setting.AILog.Cleanup = normalizeAILogCleanupSetting(setting.AILog.Cleanup)
 	setting.Storage = normalizePrivateStorageSetting(setting.Storage)
 	for i := range setting.Channels {
 		if setting.Channels[i].Protocol == "" {
@@ -141,6 +158,45 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 		}
 	}
 	return setting
+}
+
+func DefaultSystemPrompts() model.SystemPromptSetting {
+	return model.SystemPromptSetting{
+		Image:    "",
+		Video:    "",
+		Text:     "",
+		Workflow: "",
+		WorkflowAgent: `你是一个用于创建图片创作工作流的产品设计助理。请根据用户需求输出严格 JSON，不要输出 Markdown。
+目标：把用户的自然语言需求整理为一个可复用的图片生成工作流。
+要求：
+1. 工作流必须面向同类型批量创作，变量字段要少而明确。
+2. 变量名使用 snake_case，label 使用中文。
+3. promptTemplate 必须使用 {{variable_name}} 引用变量。
+4. config 只输出必要配置，apiMode 可为 responses 或 images。
+5. inputVariables 支持 short_text、long_text、number、select、boolean。
+6. select 类型的 options 必须是字符串数组。
+7. 输出 JSON 结构：
+{
+  "name": "工作流名称",
+  "category": "分类",
+  "description": "一句话描述",
+  "promptTemplate": "生成提示词模板",
+  "systemPrompt": "系统提示词，可空",
+  "inputVariables": [
+    {"key":"product_name","label":"产品名称","type":"short_text","required":true,"defaultValue":"","options":[]}
+  ],
+  "config": {
+    "model": "",
+    "apiMode": "responses",
+    "size": "auto",
+    "quality": "auto",
+    "count": "1",
+    "outputFormat": "png",
+    "timeout": 600
+  },
+  "warnings": []
+}`,
+	}
 }
 
 func normalizePrivateStorageSetting(setting model.PrivateStorageSetting) model.PrivateStorageSetting {

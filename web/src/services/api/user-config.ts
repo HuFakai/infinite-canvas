@@ -10,6 +10,7 @@ export type UserConfigPayload = {
     syncCapabilities?: {
         userData?: boolean;
         workflows?: boolean;
+        assets?: boolean;
     };
 };
 
@@ -51,6 +52,14 @@ export async function fetchUserImageHistory<T>(token: string) {
 
 export async function syncUserImageHistory<T>(token: string, data: T) {
     return apiPost<T>("/api/v1/user-data/image-history", { data }, token);
+}
+
+export async function fetchUserAssetData<T>(token: string) {
+    return apiGet<T>("/api/v1/user-data/assets", undefined, token);
+}
+
+export async function syncUserAssetData<T>(token: string, data: T) {
+    return apiPost<T>("/api/v1/user-data/assets", { data }, token);
 }
 
 export type CreativeWorkflowRecord<T = unknown> = {

@@ -80,7 +80,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     <CanvasPromptLibrary onSelect={updatePrompt} />
                     {mode === "image" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker config={config} value={config.model} channelId={config.imageChannelId} onChange={(model, channelId) => onConfigChange(node.id, { model, ...(channelId ? { imageChannelId: channelId } : {}) })} onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasImageSettingsPopover
                                 config={config}
                                 placement="topLeft"
@@ -92,7 +92,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker config={config} value={config.model} channelId={config.videoChannelId} onChange={(model, channelId) => onConfigChange(node.id, { model, ...(channelId ? { videoChannelId: channelId } : {}) })} onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasVideoSettingsPopover
                                 config={config}
                                 buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3"
@@ -100,7 +100,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             />
                         </>
                     ) : (
-                        <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} onMissingConfig={() => openConfigDialog(true)} />
+                        <ModelPicker config={config} value={config.model} channelId={config.textChannelId} onChange={(model, channelId) => onConfigChange(node.id, { model, ...(channelId ? { textChannelId: channelId } : {}) })} onMissingConfig={() => openConfigDialog(true)} />
                     )}
                 </div>
                 <Button type="primary" className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3" disabled={isRunning || !prompt.trim()} onClick={submit} aria-label="生成">
@@ -126,6 +126,9 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     return {
         ...globalConfig,
         model: node.metadata?.model || defaultModel || globalConfig.model || defaultConfig.model,
+        imageChannelId: node.metadata?.imageChannelId || globalConfig.imageChannelId,
+        videoChannelId: node.metadata?.videoChannelId || globalConfig.videoChannelId,
+        textChannelId: node.metadata?.textChannelId || globalConfig.textChannelId,
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,
         outputFormat: node.metadata?.outputFormat || globalConfig.outputFormat || defaultConfig.outputFormat,

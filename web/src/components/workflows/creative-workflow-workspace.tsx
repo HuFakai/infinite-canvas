@@ -35,7 +35,7 @@ type WorkflowVariable = {
 
 export type WorkflowGenerationConfig = Pick<
     AiConfig,
-    "model" | "imageModel" | "quality" | "size" | "count" | "apiMode" | "outputFormat" | "outputCompression" | "moderation" | "timeout" | "streamImages" | "streamPartialImages" | "responseFormatB64Json" | "codexCli"
+    "model" | "imageModel" | "imageChannelId" | "quality" | "size" | "count" | "apiMode" | "outputFormat" | "outputCompression" | "moderation" | "timeout" | "streamImages" | "streamPartialImages" | "responseFormatB64Json" | "codexCli"
 > & {
     systemPrompt: string;
     promptTemplate: string;
@@ -533,7 +533,7 @@ export function CreativeWorkflowWorkspace({
         const performanceStartedAt = performance.now();
         const count = Math.max(1, Math.min(10, Number(runConfig.count) || 1));
         const taskId = nanoid();
-        const taskConfig = { ...runningWorkflow.config, model, imageModel: model, apiMode: runtime.apiMode };
+        const taskConfig = { ...runningWorkflow.config, model, imageModel: model, imageChannelId: runtime.channelId, apiMode: runtime.apiMode };
         const promptSnapshot = renderedPrompt;
         const inputSnapshot = { ...inputValues };
         onWorkflowTaskStarted?.({
@@ -1210,7 +1210,7 @@ function WorkflowEditorModal({
                 </div>
                 <aside className="space-y-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                     <div className="text-sm font-medium">生成配置</div>
-                    <ModelPicker config={modelConfig} fullWidth value={workflow.config.imageModel || workflow.config.model} onChange={(value) => patchConfig({ imageModel: value, model: value })} />
+                    <ModelPicker config={modelConfig} fullWidth value={workflow.config.imageModel || workflow.config.model} channelId={workflow.config.imageChannelId || modelConfig.imageChannelId} onChange={(value, channelId) => patchConfig({ imageModel: value, model: value, ...(channelId ? { imageChannelId: channelId } : {}) })} />
                     <Select
                         className="w-full"
                         value={workflow.config.apiMode}
@@ -1359,6 +1359,7 @@ function createWorkflowConfig(config: AiConfig): WorkflowGenerationConfig {
     return {
         model: config.model || defaultConfig.model,
         imageModel: config.imageModel || config.model || defaultConfig.imageModel,
+        imageChannelId: config.imageChannelId || "",
         quality: config.quality || defaultConfig.quality,
         size: config.size || defaultConfig.size,
         count: config.count || "1",
@@ -1371,7 +1372,7 @@ function createWorkflowConfig(config: AiConfig): WorkflowGenerationConfig {
         streamPartialImages: config.streamPartialImages || "1",
         responseFormatB64Json: config.responseFormatB64Json !== false,
         codexCli: Boolean(config.codexCli),
-        systemPrompt: config.systemPrompt || "",
+        systemPrompt: config.systemPrompts.workflow || config.systemPrompt || "",
         promptTemplate: "",
         negativePrompt: "",
     };
@@ -1496,22 +1497,23 @@ function recordToWorkflow(record: CreativeWorkflowRecord<CreativeWorkflow>): Cre
 function resolveWorkflowRuntime(workflow: CreativeWorkflow, baseConfig: AiConfig) {
     const workflowModel = workflow.config.imageModel || workflow.config.model;
     const fallbackModel = baseConfig.imageModel || baseConfig.model;
-    if (!workflowModel) return { model: fallbackModel, apiMode: baseConfig.apiMode };
+    if (!workflowModel) return { model: fallbackModel, apiMode: baseConfig.apiMode, channelId: baseConfig.imageChannelId };
     if (baseConfig.channelMode === "remote" && workflowModel !== fallbackModel && (!baseConfig.models.length || !baseConfig.models.includes(workflowModel))) {
-        return { model: fallbackModel, apiMode: baseConfig.apiMode };
+        return { model: fallbackModel, apiMode: baseConfig.apiMode, channelId: baseConfig.imageChannelId };
     }
-    return { model: workflowModel, apiMode: workflow.config.apiMode || baseConfig.apiMode };
+    return { model: workflowModel, apiMode: workflow.config.apiMode || baseConfig.apiMode, channelId: workflow.config.imageChannelId || baseConfig.imageChannelId };
 }
 
-function buildRunConfig(baseConfig: AiConfig, workflowConfig: WorkflowGenerationConfig, runtime: { model: string; apiMode: AiConfig["apiMode"] }): AiConfig {
+function buildRunConfig(baseConfig: AiConfig, workflowConfig: WorkflowGenerationConfig, runtime: { model: string; apiMode: AiConfig["apiMode"]; channelId: string }): AiConfig {
     return {
         ...baseConfig,
         ...workflowConfig,
         model: runtime.model,
         imageModel: runtime.model,
-        activeChannelId: baseConfig.imageChannelId,
+        imageChannelId: runtime.channelId,
+        activeChannelId: runtime.channelId,
         apiMode: runtime.apiMode,
-        systemPrompt: workflowConfig.systemPrompt || baseConfig.systemPrompt,
+        systemPrompt: workflowConfig.systemPrompt || baseConfig.systemPrompts.workflow || baseConfig.systemPrompt,
         count: workflowConfig.count || "1",
     };
 }

@@ -375,8 +375,15 @@ export default function ImagePage() {
         }
     };
 
-    const downloadImage = (image: GeneratedImage, index: number) => {
-        saveAs(image.dataUrl, `image-${index + 1}.png`);
+    const downloadImage = async (image: GeneratedImage, index: number) => {
+        try {
+            const dataUrl = await imageToDataUrl(image);
+            const response = await fetch(dataUrl || image.dataUrl);
+            const blob = await response.blob();
+            saveAs(blob, `image-${index + 1}.${imageExtension(image.mimeType || blob.type || dataUrl || image.dataUrl)}`);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "图片下载失败");
+        }
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
@@ -879,7 +886,7 @@ export default function ImagePage() {
             </main>
             <button
                 type="button"
-                className="fixed z-30 inline-flex touch-none select-none items-center gap-2 rounded-full border border-stone-200 bg-white/85 px-4 py-3 text-sm font-medium text-stone-900 shadow-2xl shadow-stone-900/10 backdrop-blur-xl transition hover:bg-white dark:border-stone-800 dark:bg-stone-900/80 dark:text-stone-100 dark:hover:bg-stone-900"
+                className="fixed z-30 inline-flex touch-none select-none items-center gap-2 rounded-full border border-sky-300/70 bg-white/90 px-4 py-3 text-sm font-semibold text-stone-950 shadow-[0_18px_50px_rgba(14,165,233,0.28),0_8px_18px_rgba(0,0,0,0.14)] ring-1 ring-white/70 backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-sky-300 hover:bg-white hover:shadow-[0_22px_64px_rgba(14,165,233,0.36),0_10px_22px_rgba(0,0,0,0.18)] dark:border-sky-400/40 dark:bg-stone-900/88 dark:text-stone-100 dark:ring-white/10 dark:hover:bg-stone-900"
                 style={{ left: workflowButtonPosition.x || defaultWorkflowButtonPosition().x, top: workflowButtonPosition.y || defaultWorkflowButtonPosition().y }}
                 onPointerDown={handleWorkflowButtonPointerDown}
                 onPointerMove={handleWorkflowButtonPointerMove}
@@ -893,7 +900,8 @@ export default function ImagePage() {
                     setWorkflowDrawerOpen(true);
                 }}
             >
-                <WandSparkles className="size-4" />
+                <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-sky-400 shadow-[0_0_18px_rgba(56,189,248,0.9)]" />
+                <WandSparkles className="size-4 text-sky-500 dark:text-sky-300" />
                 工作流
             </button>
             <Drawer title="创作工作流" placement="right" size="min(1120px, 92vw)" open={workflowDrawerOpen} onClose={() => setWorkflowDrawerOpen(false)} styles={{ body: { padding: 0 } }} destroyOnHidden={false}>
@@ -1486,7 +1494,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
     return (
         <div className="space-y-3">
             <SettingSubsection title="模型" summary={model || "未选择模型"} collapsed={modelCollapsed} onToggle={() => setModelCollapsed((value) => !value)}>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ModelPicker config={config} value={model} channelId={config.imageChannelId} onChange={(value, channelId) => { updateConfig("imageModel", value); if (channelId) updateConfig("imageChannelId", channelId); }} fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </SettingSubsection>
             <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-3" maxCount={10} collapsible />
         </div>
@@ -2057,6 +2065,13 @@ function buildGenerationLogConfig(config: AiConfig): GenerationLogConfig {
         responseFormatB64Json: config.responseFormatB64Json,
         codexCli: config.codexCli,
     };
+}
+
+function imageExtension(value: string) {
+    const lower = value.toLowerCase();
+    if (lower.includes("jpeg") || lower.includes("jpg")) return "jpg";
+    if (lower.includes("webp")) return "webp";
+    return "png";
 }
 
 function defaultWorkflowButtonPosition() {

@@ -28,9 +28,10 @@ function refreshRemoteUser(config: AiConfig) {
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = []) {
     const model = config.model || config.videoModel;
+    const systemPrompt = (config.systemPrompts.video || config.systemPrompt).trim();
     const body = new FormData();
     body.append("model", model);
-    body.append("prompt", prompt);
+    body.append("prompt", systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt);
     body.append("seconds", normalizeVideoSeconds(config.videoSeconds));
     if (normalizeVideoSize(config.size)) body.append("size", normalizeVideoSize(config.size)!);
     body.append("resolution_name", normalizeVideoResolution(config.vquality));

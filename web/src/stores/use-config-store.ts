@@ -37,6 +37,15 @@ export type AiConfig = {
     videoSeconds: string;
     vquality: string;
     systemPrompt: string;
+    systemPrompts: {
+        image: string;
+        video: string;
+        text: string;
+        workflow: string;
+        workflowAgent: string;
+    };
+    syncModelConfig: boolean;
+    syncStorageConfig: boolean;
     models: string[];
     publicChannels: AdminPublicSettings["modelChannel"]["channels"];
     quality: string;
@@ -71,6 +80,9 @@ export const defaultConfig: AiConfig = {
     videoSeconds: "6",
     vquality: "720",
     systemPrompt: "",
+    systemPrompts: { image: "", video: "", text: "", workflow: "", workflowAgent: "" },
+    syncModelConfig: false,
+    syncStorageConfig: false,
     models: [],
     publicChannels: [],
     quality: "auto",
@@ -115,7 +127,8 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
         imageChannelId,
         videoChannelId,
         textChannelId,
-        systemPrompt: modelChannel.systemPrompt,
+        systemPrompt: modelChannel.systemPrompts?.image || modelChannel.systemPrompt,
+        systemPrompts: modelChannel.systemPrompts || defaultConfig.systemPrompts,
     };
 }
 
@@ -212,6 +225,9 @@ export const useConfigStore = create<ConfigStore>()(
                         moderation: config.moderation === "low" ? "low" : "auto",
                         videoSeconds: config.videoSeconds || "6",
                         vquality: config.vquality || "720",
+                        systemPrompts: { ...defaultConfig.systemPrompts, ...(config.systemPrompts || {}) },
+                        syncModelConfig: config.syncModelConfig === true,
+                        syncStorageConfig: config.syncStorageConfig === true,
                     },
                 };
             },

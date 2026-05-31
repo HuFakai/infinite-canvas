@@ -57,6 +57,7 @@ type UserConfigPayload struct {
 	StorageProvider  *StorageObjectProviderInput `json:"storageProvider,omitempty"`
 	CanvasData       json.RawMessage             `json:"canvasData,omitempty"`
 	ImageHistory     json.RawMessage             `json:"imageHistory,omitempty"`
+	AssetData        json.RawMessage             `json:"assetData,omitempty"`
 	SyncCapabilities map[string]bool             `json:"syncCapabilities,omitempty"`
 }
 
@@ -130,11 +131,14 @@ func CurrentUserConfig(ctx context.Context) (UserConfigPayload, error) {
 		return UserConfigPayload{}, errors.New("请先登录")
 	}
 	config, ok, err := repository.GetUserConfig(user.ID)
-	if err != nil || !ok {
+	if err != nil {
 		return UserConfigPayload{}, err
 	}
 	result := UserConfigPayload{}
-	result.SyncCapabilities = map[string]bool{"userData": true, "workflows": true}
+	result.SyncCapabilities = map[string]bool{"userData": true, "workflows": true, "assets": true}
+	if !ok {
+		return result, nil
+	}
 	if strings.TrimSpace(config.ModelConfig) != "" {
 		result.ModelConfig = json.RawMessage(config.ModelConfig)
 	}
@@ -149,6 +153,9 @@ func CurrentUserConfig(ctx context.Context) (UserConfigPayload, error) {
 	}
 	if strings.TrimSpace(config.ImageHistory) != "" {
 		result.ImageHistory = json.RawMessage(config.ImageHistory)
+	}
+	if strings.TrimSpace(config.AssetData) != "" {
+		result.AssetData = json.RawMessage(config.AssetData)
 	}
 	return result, nil
 }
@@ -215,6 +222,27 @@ func SaveCurrentUserImageHistory(ctx context.Context, raw json.RawMessage) (json
 		return nil, err
 	}
 	return json.RawMessage(config.ImageHistory), nil
+}
+
+func CurrentUserAssetData(ctx context.Context) (json.RawMessage, error) {
+	config, err := currentUserConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(config.AssetData) == "" {
+		return json.RawMessage(`{"assets":[]}`), nil
+	}
+	return json.RawMessage(config.AssetData), nil
+}
+
+func SaveCurrentUserAssetData(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	config, err := saveCurrentUserConfigField(ctx, func(config *model.UserConfig) {
+		config.AssetData = string(raw)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(config.AssetData), nil
 }
 
 func currentUserConfig(ctx context.Context) (model.UserConfig, error) {
@@ -342,6 +370,7 @@ func DeleteCreativeWorkflow(ctx context.Context, id string) error {
 }
 
 func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftRequest) (WorkflowAgentDraftResponse, error) {
+	startedAt := time.Now()
 	user, ok := UserFromContext(ctx)
 	if !ok || user.ID == "" {
 		return WorkflowAgentDraftResponse{}, errors.New("请先登录")
@@ -385,20 +414,24 @@ func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftReques
 	response, err := HTTPClientForChannel(channel).Do(httpRequest)
 	if err != nil {
 		refundCredits()
+		SaveAICallLog(AICallLogInput{UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Endpoint: "/workflows/agent-draft", Method: http.MethodPost, Model: modelName, ChannelID: channel.ID, ChannelName: channel.Name, Status: 0, DurationMs: time.Since(startedAt).Milliseconds(), Credits: credits, RequestBody: string(body), Error: err.Error()})
 		return WorkflowAgentDraftResponse{}, err
 	}
 	defer response.Body.Close()
 	responseBody, _ := io.ReadAll(response.Body)
 	if response.StatusCode >= http.StatusBadRequest {
 		refundCredits()
+		SaveAICallLog(AICallLogInput{UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Endpoint: "/workflows/agent-draft", Method: http.MethodPost, Model: modelName, ChannelID: channel.ID, ChannelName: channel.Name, Status: response.StatusCode, DurationMs: time.Since(startedAt).Milliseconds(), Credits: credits, RequestBody: string(body), ResponseBody: string(responseBody), Error: string(responseBody)})
 		return WorkflowAgentDraftResponse{}, readAdminChannelError(responseBody, response.StatusCode, "工作流 Agent 请求失败")
 	}
 	content := extractChatCompletionContent(responseBody)
 	draft, warnings, err := normalizeWorkflowDraft(content, request.Scope)
 	if err != nil {
 		refundCredits()
+		SaveAICallLog(AICallLogInput{UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Endpoint: "/workflows/agent-draft", Method: http.MethodPost, Model: modelName, ChannelID: channel.ID, ChannelName: channel.Name, Status: response.StatusCode, DurationMs: time.Since(startedAt).Milliseconds(), Credits: credits, RequestBody: string(body), ResponseBody: string(responseBody), Error: err.Error()})
 		return WorkflowAgentDraftResponse{}, err
 	}
+	SaveAICallLog(AICallLogInput{UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Endpoint: "/workflows/agent-draft", Method: http.MethodPost, Model: modelName, ChannelID: channel.ID, ChannelName: channel.Name, Status: response.StatusCode, DurationMs: time.Since(startedAt).Milliseconds(), Credits: credits, RequestBody: string(body), ResponseBody: string(responseBody)})
 	return WorkflowAgentDraftResponse{Draft: draft, Warnings: warnings, Model: modelName}, nil
 }
 
@@ -485,42 +518,14 @@ func workflowAgentMessages(prompt string, references []string) []map[string]any 
 }
 
 func workflowAgentSystemPrompt() string {
-	return `你是创作工作流生成 Agent。你必须只输出一个 JSON 对象，不要输出 Markdown。
-根据用户需求生成可复用的图片创作工作流草稿。
-JSON 字段：
-{
-  "name": "工作流名称",
-  "category": "分类",
-  "description": "一句话说明",
-  "scope": "private",
-  "variables": [
-    {"id":"","key":"变量名","label":"显示名","type":"text|textarea|number|select|boolean","required":true,"defaultValue":"","options":["选项"]}
-  ],
-  "config": {
-    "systemPrompt": "系统提示词，可空",
-    "promptTemplate": "使用 {{变量名}} 插入变量的生图提示词模板",
-    "negativePrompt": "负面约束，可空",
-    "apiMode": "responses",
-    "size": "auto",
-    "quality": "high",
-    "count": "1",
-    "outputFormat": "png",
-    "outputCompression": "100",
-    "moderation": "auto",
-    "timeout": "600",
-    "streamImages": true,
-    "streamPartialImages": "1",
-    "responseFormatB64Json": true,
-    "codexCli": false
-  }
-}
-规则：
-1. 用户文本里的 {自动 / A / B}、A/B/C、每行一个选项，应生成 select。
-2. “是否/开启/关闭/需要/不需要”生成 boolean。
-3. 长描述生成 textarea，数量/强度/年龄等可生成 number 或 select。
-4. key 只用英文、数字、下划线，模板必须用 {{key}} 引用。
-5. 默认 scope 为 private，除非用户明确要求公开。
-6. 不要自动保存，不要输出解释。`
+	systemPrompt := ""
+	if settings, err := repository.GetSettings(); err == nil {
+		systemPrompt = strings.TrimSpace(normalizeSettings(settings).Public.ModelChannel.SystemPrompts.WorkflowAgent)
+	}
+	if systemPrompt != "" {
+		return systemPrompt
+	}
+	return DefaultSystemPrompts().WorkflowAgent
 }
 
 func extractChatCompletionContent(body []byte) string {

@@ -51,6 +51,29 @@ export type AdminCreditLogListResponse = {
     total: number;
 };
 
+export type AdminAICallLog = {
+    id: string;
+    userId: string;
+    userDisplayName: string;
+    endpoint: string;
+    method: string;
+    model: string;
+    channelId: string;
+    channelName: string;
+    status: number;
+    durationMs: number;
+    credits: number;
+    requestBody: string;
+    responseBody: string;
+    error: string;
+    createdAt: string;
+};
+
+export type AdminAICallLogListResponse = {
+    items: AdminAICallLog[];
+    total: number;
+};
+
 export type AdminUserQuery = {
     keyword?: string;
     page?: number;
@@ -83,6 +106,14 @@ export async function saveAdminCreditLog(token: string, log: Partial<AdminCredit
 
 export async function deleteAdminCreditLog(token: string, id: string) {
     return apiDelete<boolean>(`/api/admin/credit-logs/${encodeURIComponent(id)}`, token);
+}
+
+export async function fetchAdminAICallLogs(token: string, query: AdminUserQuery = {}) {
+    return apiGet<AdminAICallLogListResponse>("/api/admin/ai-logs", compactApiParams(query), token);
+}
+
+export async function deleteAdminAICallLogs(token: string, olderThanDays = 7) {
+    return apiDelete<{ removedFiles: number }>(`/api/admin/ai-logs?olderThanDays=${encodeURIComponent(String(olderThanDays))}`, token);
 }
 
 export async function fetchAdminPromptCategories(token: string) {
@@ -179,6 +210,13 @@ export type AdminPublicModelChannelSettings = {
     defaultVideoModel: string;
     defaultTextModel: string;
     systemPrompt: string;
+    systemPrompts: {
+        image: string;
+        video: string;
+        text: string;
+        workflow: string;
+        workflowAgent: string;
+    };
     allowCustomChannel: boolean;
 };
 
@@ -236,6 +274,13 @@ export type AdminPrivateSettings = {
     promptSync: {
         enabled: boolean;
         cron: string;
+    };
+    aiLog: {
+        cleanup: {
+            enabled: boolean;
+            retentionDays: number;
+            cron: string;
+        };
     };
     auth: {
         linuxDo: {

@@ -2768,11 +2768,14 @@ function getInputSummary(inputs: NodeGenerationInput[]) {
 
 function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : config.textModel;
-    const activeChannelId = mode === "image" ? config.imageChannelId : mode === "video" ? config.videoChannelId : config.textChannelId;
+    const activeChannelId = mode === "image" ? node?.metadata?.imageChannelId || config.imageChannelId : mode === "video" ? node?.metadata?.videoChannelId || config.videoChannelId : node?.metadata?.textChannelId || config.textChannelId;
     return {
         ...config,
         model: node?.metadata?.model || defaultModel || config.model || defaultConfig.model,
         activeChannelId,
+        imageChannelId: node?.metadata?.imageChannelId || config.imageChannelId,
+        videoChannelId: node?.metadata?.videoChannelId || config.videoChannelId,
+        textChannelId: node?.metadata?.textChannelId || config.textChannelId,
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
         size: node?.metadata?.size || config.size || defaultConfig.size,
         outputFormat: node?.metadata?.outputFormat || config.outputFormat || defaultConfig.outputFormat,

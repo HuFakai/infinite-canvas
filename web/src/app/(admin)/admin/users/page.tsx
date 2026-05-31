@@ -115,7 +115,7 @@ export default function AdminUsersPage() {
     ];
 
     return (
-        <main style={{ padding: 24 }}>
+        <main className="p-3 md:p-6">
             <Flex vertical gap={16}>
                 <Card variant="borderless">
                     <Form layout="vertical">
@@ -160,6 +160,7 @@ export default function AdminUsersPage() {
                     search={false}
                     defaultSize="middle"
                     tableLayout="fixed"
+                    scroll={{ x: 980 }}
                     cardProps={{ variant: "borderless" }}
                     headerTitle={
                         <Space>

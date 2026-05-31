@@ -466,11 +466,11 @@ function AssistantComposer({
                         <AssistantModeSwitch mode={mode} theme={theme} onChange={onModeChange} />
                         {mode === "image" ? (
                             <>
-                                <ModelPicker className="h-8 shrink-0" config={config} value={config.imageModel || config.model} onChange={(model) => onConfigChange("imageModel", model)} onMissingConfig={onMissingConfig} />
+                                <ModelPicker className="h-8 shrink-0" config={config} value={config.imageModel || config.model} channelId={config.imageChannelId} onChange={(model, channelId) => { onConfigChange("imageModel", model); if (channelId) onConfigChange("imageChannelId", channelId); }} onMissingConfig={onMissingConfig} />
                                 <CanvasImageSettingsPopover config={config} placement="topRight" getPopupContainer={() => document.body} buttonClassName="canvas-composer-settings canvas-composer-icon !h-8 !min-w-8 !rounded-full !px-2" onConfigChange={onConfigChange} onMissingConfig={onMissingConfig} />
                             </>
                         ) : (
-                            <ModelPicker className="h-8 shrink-0" config={config} value={config.textModel || config.model} onChange={(model) => onConfigChange("textModel", model)} onMissingConfig={onMissingConfig} />
+                            <ModelPicker className="h-8 shrink-0" config={config} value={config.textModel || config.model} channelId={config.textChannelId} onChange={(model, channelId) => { onConfigChange("textModel", model); if (channelId) onConfigChange("textChannelId", channelId); }} onMissingConfig={onMissingConfig} />
                         )}
                     </div>
                     <Button

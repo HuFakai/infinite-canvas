@@ -98,7 +98,7 @@ export default function AdminCreditLogsPage() {
     ];
 
     return (
-        <main style={{ padding: 24 }}>
+        <main className="p-3 md:p-6">
             <Space orientation="vertical" size={16} style={{ width: "100%" }}>
                 <Card variant="borderless">
                     <Form layout="vertical">
@@ -143,6 +143,7 @@ export default function AdminCreditLogsPage() {
                     search={false}
                     defaultSize="middle"
                     tableLayout="fixed"
+                    scroll={{ x: 1100 }}
                     cardProps={{ variant: "borderless" }}
                     headerTitle={
                         <Space>

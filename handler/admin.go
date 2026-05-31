@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/basketikun/infinite-canvas/model"
 	"github.com/basketikun/infinite-canvas/service"
@@ -56,6 +57,42 @@ func AdminDeletePrompts(w http.ResponseWriter, r *http.Request) {
 		FailError(w, err)
 		return
 	}
+	OK(w, true)
+}
+
+func AdminAICallLogs(w http.ResponseWriter, r *http.Request) {
+	result, err := service.ListAICallLogs(parseQuery(r))
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, result)
+}
+
+func AdminDeleteAICallLogs(w http.ResponseWriter, r *http.Request) {
+	days, _ := strconv.Atoi(r.URL.Query().Get("olderThanDays"))
+	if days <= 0 {
+		days = 7
+	}
+	removed, err := service.DeleteAICallLogsOlderThan(days)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, map[string]int{"removedFiles": removed})
+}
+
+func ClientAICallLog(w http.ResponseWriter, r *http.Request) {
+	user, ok := service.UserFromContext(r.Context())
+	if !ok || user.ID == "" {
+		Fail(w, "请先登录")
+		return
+	}
+	var request service.AICallLogInput
+	_ = json.NewDecoder(r.Body).Decode(&request)
+	request.UserID = user.ID
+	request.UserDisplayName = firstNonEmpty(user.DisplayName, user.Username)
+	service.SaveAICallLog(request)
 	OK(w, true)
 }
 

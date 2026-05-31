@@ -119,7 +119,20 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, inputs, o
             </div>
 
             <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${mode === "text" ? "grid-cols-1" : "grid-cols-[minmax(0,1fr)_148px]"}`} onMouseDown={(event) => event.stopPropagation()}>
-                <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} onMissingConfig={() => openConfigDialog(true)} fullWidth />
+                <ModelPicker
+                    className="canvas-compact-control h-10"
+                    config={config}
+                    value={config.model}
+                    channelId={mode === "image" ? config.imageChannelId : mode === "video" ? config.videoChannelId : config.textChannelId}
+                    onChange={(model, channelId) =>
+                        onConfigChange(node.id, {
+                            model,
+                            ...(channelId ? (mode === "image" ? { imageChannelId: channelId } : mode === "video" ? { videoChannelId: channelId } : { textChannelId: channelId }) : {}),
+                        })
+                    }
+                    onMissingConfig={() => openConfigDialog(true)}
+                    fullWidth
+                />
                 {mode === "video" ? (
                     <CanvasVideoSettingsPopover
                         config={config}
