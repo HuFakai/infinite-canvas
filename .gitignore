@@ -12,3 +12,4 @@ data_副本/
 .idea
 .agents/skills/wechatpay-payment-integration/assets/微信支付官网文档/
 .agents/skills/wechatpay-payment-integration/scripts/.wechatpay-docs-sync-state.json
+server

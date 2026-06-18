@@ -45,14 +45,6 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		Fail(w, "未登录或权限不足")
 		return
 	}
-	unitCredits, err := service.ModelCost(modelName)
-	if err != nil {
-		log.Printf("AI proxy read model cost failed: model=%s err=%v", modelName, err)
-		Fail(w, "AI 接口请求失败")
-		return
-	}
-	requestCount := readAIRequestCount(body, contentType)
-	credits := unitCredits * requestCount
 	channel, err := service.SelectModelChannelForModel(modelName, r.Header.Get("X-Model-Channel-ID"))
 	if err != nil {
 		log.Printf("AI proxy select channel failed: model=%s err=%v", modelName, err)
@@ -69,10 +61,6 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	if contentType != "" {
 		request.Header.Set("Content-Type", contentType)
 	}
-	if err := service.ConsumeUserCredits(user.ID, modelName, credits, path, channel); err != nil {
-		FailError(w, err)
-		return
-	}
 	copyAIResponse(w, request, channel, aiLogContext{
 		StartedAt:       startedAt,
 		Endpoint:        path,
@@ -81,15 +69,9 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		Channel:         channel,
 		UserID:          user.ID,
 		UserDisplayName: firstNonEmpty(user.DisplayName, user.Username),
-		Credits:         credits,
-		UnitCredits:     unitCredits,
 		ExpectImage:     isImageAIRequest(path, body),
 		RequestBody:     summarizeAIRequest(body, contentType),
-	}, func() {
-		if err := service.RefundUserCredits(user.ID, modelName, credits, path, channel); err != nil {
-			log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, err)
-		}
-	})
+	}, nil)
 }
 
 type aiLogContext struct {
@@ -157,22 +139,16 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, channel model.
 	result := copyAIResponseBody(w, response.Body, logContext.ExpectImage, keepalive)
 	status := response.StatusCode
 	errorMessage := ""
-	chargedCredits := logContext.Credits
 	if logContext.ExpectImage {
 		if result.HasError || result.ImageCount <= 0 {
 			status = http.StatusBadGateway
 			errorMessage = firstNonEmpty(result.ErrorMessage, "AI 接口未返回有效图片")
-			chargedCredits = 0
 			if onFailure != nil {
 				onFailure()
 			}
-		} else if logContext.UnitCredits > 0 && result.ImageCount*logContext.UnitCredits < chargedCredits {
-			refundCredits := chargedCredits - result.ImageCount*logContext.UnitCredits
-			chargedCredits -= refundCredits
-			_ = service.RefundUserCredits(logContext.UserID, logContext.Model, refundCredits, logContext.Endpoint, logContext.Channel)
 		}
 	}
-	saveAIProxyLog(logContext, status, result.Body, errorMessage, chargedCredits)
+	saveAIProxyLog(logContext, status, result.Body, errorMessage, 0)
 }
 
 func startAIClientKeepalive(w http.ResponseWriter, enabled bool) *aiClientKeepalive {

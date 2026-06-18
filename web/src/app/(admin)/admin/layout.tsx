@@ -1,6 +1,6 @@
 "use client";
 
-import { ApiOutlined, CrownOutlined, FileTextOutlined, HomeOutlined, LogoutOutlined, MenuOutlined, PictureOutlined, SettingOutlined, ShoppingOutlined, TransactionOutlined, UserOutlined } from "@ant-design/icons";
+import { ApiOutlined, FileTextOutlined, HomeOutlined, LogoutOutlined, MenuOutlined, PictureOutlined, SettingOutlined } from "@ant-design/icons";
 import { Button, Drawer, Flex, Grid, Layout, Menu, Typography, theme } from "antd";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -13,11 +13,7 @@ import { useSiteInfo } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 
 const adminMenus = [
-    { key: "/admin/users", icon: <UserOutlined />, label: "用户管理" },
-    { key: "/admin/credit-logs", icon: <TransactionOutlined />, label: "算力点日志" },
     { key: "/admin/ai-logs", icon: <ApiOutlined />, label: "AI 调用日志" },
-    { key: "/admin/plans", icon: <CrownOutlined />, label: "会员套餐" },
-    { key: "/admin/orders", icon: <ShoppingOutlined />, label: "订单管理" },
     { key: "/admin/prompts", icon: <FileTextOutlined />, label: "提示词管理" },
     { key: "/admin/assets", icon: <PictureOutlined />, label: "素材库" },
     { key: "/admin/settings", icon: <SettingOutlined />, label: "系统设置" },

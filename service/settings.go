@@ -152,20 +152,6 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 	return setting
 }
 
-func ModelCost(modelName string) (int, error) {
-	settings, err := repository.GetSettings()
-	if err != nil {
-		return 0, err
-	}
-	modelName = strings.TrimSpace(modelName)
-	for _, item := range normalizePublicSetting(settings.Public).ModelChannel.ModelCosts {
-		if item.Model == modelName {
-			return item.Credits, nil
-		}
-	}
-	return 0, nil
-}
-
 func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting {
 	if setting.Channels == nil {
 		setting.Channels = []model.ModelChannel{}

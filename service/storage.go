@@ -443,18 +443,6 @@ func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftReques
 	if err != nil {
 		return WorkflowAgentDraftResponse{}, err
 	}
-	credits, _ := ModelCost(modelName)
-	chargedCredits := request.ChannelMode != "local"
-	if chargedCredits {
-		if err := ConsumeUserCredits(user.ID, modelName, credits, "/workflows/agent-draft", channel); err != nil {
-			return WorkflowAgentDraftResponse{}, err
-		}
-	}
-	refundCredits := func() {
-		if chargedCredits {
-			_ = RefundUserCredits(user.ID, modelName, credits, "/workflows/agent-draft", channel)
-		}
-	}
 	body, _ := json.Marshal(map[string]any{
 		"model":       modelName,
 		"messages":    workflowAgentMessages(prompt, request.References),
@@ -462,32 +450,28 @@ func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftReques
 	})
 	httpRequest, err := http.NewRequest(http.MethodPost, BuildModelChannelURL(channel, "/chat/completions"), bytes.NewReader(body))
 	if err != nil {
-		refundCredits()
 		return WorkflowAgentDraftResponse{}, err
 	}
 	httpRequest.Header.Set("Authorization", "Bearer "+channel.APIKey)
 	httpRequest.Header.Set("Content-Type", "application/json")
 	response, err := HTTPClientForChannel(channel).Do(httpRequest)
 	if err != nil {
-		refundCredits()
-		SaveAICallLog(AICallLogInput{UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Endpoint: "/workflows/agent-draft", Method: http.MethodPost, Model: modelName, ChannelID: channel.ID, ChannelName: channel.Name, Status: 0, DurationMs: time.Since(startedAt).Milliseconds(), Credits: credits, RequestBody: string(body), Error: err.Error()})
+		SaveAICallLog(AICallLogInput{UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Endpoint: "/workflows/agent-draft", Method: http.MethodPost, Model: modelName, ChannelID: channel.ID, ChannelName: channel.Name, Status: 0, DurationMs: time.Since(startedAt).Milliseconds(), RequestBody: string(body), Error: err.Error()})
 		return WorkflowAgentDraftResponse{}, err
 	}
 	defer response.Body.Close()
 	responseBody, _ := io.ReadAll(response.Body)
 	if response.StatusCode >= http.StatusBadRequest {
-		refundCredits()
-		SaveAICallLog(AICallLogInput{UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Endpoint: "/workflows/agent-draft", Method: http.MethodPost, Model: modelName, ChannelID: channel.ID, ChannelName: channel.Name, Status: response.StatusCode, DurationMs: time.Since(startedAt).Milliseconds(), Credits: credits, RequestBody: string(body), ResponseBody: string(responseBody), Error: string(responseBody)})
+		SaveAICallLog(AICallLogInput{UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Endpoint: "/workflows/agent-draft", Method: http.MethodPost, Model: modelName, ChannelID: channel.ID, ChannelName: channel.Name, Status: response.StatusCode, DurationMs: time.Since(startedAt).Milliseconds(), RequestBody: string(body), ResponseBody: string(responseBody), Error: string(responseBody)})
 		return WorkflowAgentDraftResponse{}, readAdminChannelError(responseBody, response.StatusCode, "工作流 Agent 请求失败")
 	}
 	content := extractChatCompletionContent(responseBody)
 	draft, warnings, err := normalizeWorkflowDraft(content, request.Scope)
 	if err != nil {
-		refundCredits()
-		SaveAICallLog(AICallLogInput{UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Endpoint: "/workflows/agent-draft", Method: http.MethodPost, Model: modelName, ChannelID: channel.ID, ChannelName: channel.Name, Status: response.StatusCode, DurationMs: time.Since(startedAt).Milliseconds(), Credits: credits, RequestBody: string(body), ResponseBody: string(responseBody), Error: err.Error()})
+		SaveAICallLog(AICallLogInput{UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Endpoint: "/workflows/agent-draft", Method: http.MethodPost, Model: modelName, ChannelID: channel.ID, ChannelName: channel.Name, Status: response.StatusCode, DurationMs: time.Since(startedAt).Milliseconds(), RequestBody: string(body), ResponseBody: string(responseBody), Error: err.Error()})
 		return WorkflowAgentDraftResponse{}, err
 	}
-	SaveAICallLog(AICallLogInput{UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Endpoint: "/workflows/agent-draft", Method: http.MethodPost, Model: modelName, ChannelID: channel.ID, ChannelName: channel.Name, Status: response.StatusCode, DurationMs: time.Since(startedAt).Milliseconds(), Credits: credits, RequestBody: string(body), ResponseBody: string(responseBody)})
+	SaveAICallLog(AICallLogInput{UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Endpoint: "/workflows/agent-draft", Method: http.MethodPost, Model: modelName, ChannelID: channel.ID, ChannelName: channel.Name, Status: response.StatusCode, DurationMs: time.Since(startedAt).Milliseconds(), RequestBody: string(body), ResponseBody: string(responseBody)})
 	return WorkflowAgentDraftResponse{Draft: draft, Warnings: warnings, Model: modelName}, nil
 }
 

@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-import { AUTH_TOKEN_KEY, fetchCurrentUser, login, register, type AuthPayload, type AuthUser } from "@/services/api/auth";
+import { AUTH_TOKEN_KEY, fetchCurrentUser, login, type AuthPayload, type AuthUser } from "@/services/api/auth";
 
 type UserStore = {
     token: string;
@@ -14,7 +14,6 @@ type UserStore = {
     clearSession: () => void;
     hydrateUser: () => Promise<void>;
     login: (payload: AuthPayload) => Promise<AuthUser>;
-    register: (payload: AuthPayload) => Promise<AuthUser>;
 };
 
 export const useUserStore = create<UserStore>()(
@@ -48,17 +47,6 @@ export const useUserStore = create<UserStore>()(
                 set({ isLoading: true });
                 try {
                     const session = await login(payload);
-                    set({ token: session.token, user: session.user, isReady: true, isLoading: false });
-                    return session.user;
-                } catch (error) {
-                    set({ isLoading: false });
-                    throw error;
-                }
-            },
-            register: async (payload) => {
-                set({ isLoading: true });
-                try {
-                    const session = await register(payload);
                     set({ token: session.token, user: session.user, isReady: true, isLoading: false });
                     return session.user;
                 } catch (error) {

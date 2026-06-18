@@ -67,8 +67,6 @@ func DB() (*gorm.DB, error) {
 			&model.StorageObject{},
 			&model.UserConfig{},
 			&model.CreativeWorkflow{},
-			&model.MembershipPlan{},
-			&model.MembershipOrder{},
 		)
 	})
 	return db, dbErr

@@ -1,6 +1,4 @@
 import { apiDelete, apiGet, apiPost, compactApiParams } from "@/services/api/request";
-import type { MembershipLevel } from "@/services/api/auth";
-import type { MembershipPlan, MembershipPlanListResponse, MembershipOrder, MembershipOrderListResponse } from "@/services/api/membership";
 import type { Prompt, PromptListResponse } from "@/services/api/prompts";
 
 export type AdminPromptCategory = {
@@ -10,49 +8,6 @@ export type AdminPromptCategory = {
     file: string;
     githubUrl: string;
     remote: boolean;
-};
-
-export type AdminUser = {
-    id: string;
-    username: string;
-    email: string;
-    displayName: string;
-    avatarUrl: string;
-    role: "user" | "admin";
-    credits: number;
-    membershipLevel: MembershipLevel;
-    membershipExpiresAt: string;
-    affCode: string;
-    affCount: number;
-    inviterId: string;
-    linuxDoId: string;
-    status: "active" | "ban";
-    lastLoginAt: string;
-    createdAt: string;
-    updatedAt: string;
-};
-
-export type AdminUserListResponse = {
-    items: AdminUser[];
-    total: number;
-};
-
-export type AdminCreditLog = {
-    id: string;
-    userId: string;
-    userDisplayName: string;
-    type: string;
-    amount: number;
-    balance: number;
-    relatedId: string;
-    remark: string;
-    extra: string;
-    createdAt: string;
-};
-
-export type AdminCreditLogListResponse = {
-    items: AdminCreditLog[];
-    total: number;
 };
 
 export type AdminAICallLog = {
@@ -83,34 +38,6 @@ export type AdminUserQuery = {
     page?: number;
     pageSize?: number;
 };
-
-export async function fetchAdminUsers(token: string, query: AdminUserQuery = {}) {
-    return apiGet<AdminUserListResponse>("/api/admin/users", compactApiParams(query), token);
-}
-
-export async function saveAdminUser(token: string, user: Partial<AdminUser> & { password?: string }) {
-    return apiPost<AdminUser>("/api/admin/users", user, token);
-}
-
-export async function adjustAdminUserCredits(token: string, id: string, credits: number) {
-    return apiPost<AdminUser>(`/api/admin/users/${encodeURIComponent(id)}/credits`, { credits }, token);
-}
-
-export async function deleteAdminUser(token: string, id: string) {
-    return apiDelete<boolean>(`/api/admin/users/${encodeURIComponent(id)}`, token);
-}
-
-export async function fetchAdminCreditLogs(token: string, query: AdminUserQuery = {}) {
-    return apiGet<AdminCreditLogListResponse>("/api/admin/credit-logs", compactApiParams(query), token);
-}
-
-export async function saveAdminCreditLog(token: string, log: Partial<AdminCreditLog>) {
-    return apiPost<AdminCreditLog>("/api/admin/credit-logs", log, token);
-}
-
-export async function deleteAdminCreditLog(token: string, id: string) {
-    return apiDelete<boolean>(`/api/admin/credit-logs/${encodeURIComponent(id)}`, token);
-}
 
 export async function fetchAdminAICallLogs(token: string, query: AdminUserQuery = {}) {
     return apiGet<AdminAICallLogListResponse>("/api/admin/ai-logs", compactApiParams(query), token);
@@ -398,40 +325,4 @@ export type StorageCapacityResult = {
 
 export async function measureAdminStorageProvider(token: string, payload: { index: number; provider: AdminStorageProvider }) {
     return apiPost<StorageCapacityResult>("/api/admin/storage/measure", payload, token);
-}
-
-export type AdminMembershipPlanQuery = {
-    keyword?: string;
-    page?: number;
-    pageSize?: number;
-};
-
-export async function fetchAdminMembershipPlans(token: string, query: AdminMembershipPlanQuery = {}) {
-    return apiGet<MembershipPlanListResponse>("/api/admin/membership-plans", compactApiParams(query), token);
-}
-
-export async function saveAdminMembershipPlan(token: string, plan: Partial<MembershipPlan>) {
-    return apiPost<MembershipPlan>("/api/admin/membership-plans", plan, token);
-}
-
-export async function deleteAdminMembershipPlan(token: string, id: string) {
-    return apiDelete<boolean>(`/api/admin/membership-plans/${encodeURIComponent(id)}`, token);
-}
-
-export type AdminMembershipOrderQuery = {
-    keyword?: string;
-    page?: number;
-    pageSize?: number;
-};
-
-export async function fetchAdminMembershipOrders(token: string, query: AdminMembershipOrderQuery = {}) {
-    return apiGet<MembershipOrderListResponse>("/api/admin/membership-orders", compactApiParams(query), token);
-}
-
-export async function markAdminMembershipOrderPaid(token: string, id: string, paymentId?: string) {
-    return apiPost<MembershipOrder>(`/api/admin/membership-orders/${encodeURIComponent(id)}/pay`, { paymentId }, token);
-}
-
-export async function deleteAdminMembershipOrder(token: string, id: string) {
-    return apiDelete<boolean>(`/api/admin/membership-orders/${encodeURIComponent(id)}`, token);
 }

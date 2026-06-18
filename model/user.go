@@ -25,8 +25,6 @@ type User struct {
 	AvatarURL           string          `json:"avatarUrl"`
 	Role                UserRole        `json:"role"`
 	Credits             int             `json:"credits"`
-	MembershipLevel     MembershipLevel `json:"membershipLevel"`
-	MembershipExpiresAt string          `json:"membershipExpiresAt"`
 	AffCode             string          `json:"affCode" gorm:"uniqueIndex"`
 	AffCount            int             `json:"affCount"`
 	InviterID           string          `json:"inviterId"`
@@ -55,8 +53,6 @@ type AuthUser struct {
 	AvatarURL           string          `json:"avatarUrl"`
 	Role                UserRole        `json:"role"`
 	Credits             int             `json:"credits"`
-	MembershipLevel     MembershipLevel `json:"membershipLevel"`
-	MembershipExpiresAt string          `json:"membershipExpiresAt"`
 	CreatedAt           string          `json:"createdAt"`
 	UpdatedAt           string          `json:"updatedAt"`
 }
@@ -75,8 +71,6 @@ func PublicUser(user User) AuthUser {
 		AvatarURL:           user.AvatarURL,
 		Role:                user.Role,
 		Credits:             user.Credits,
-		MembershipLevel:     user.MembershipLevel,
-		MembershipExpiresAt: user.MembershipExpiresAt,
 		CreatedAt:           user.CreatedAt,
 		UpdatedAt:           user.UpdatedAt,
 	}
