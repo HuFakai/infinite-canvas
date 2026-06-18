@@ -12,16 +12,14 @@ description: settings 表中 public 和 private 配置结构说明
 | `public` | 公开配置，前端可以读取 |
 | `private` | 私有配置，只给后端和管理员使用 |
 
+> 私有化版本已移除会员、支付、OIDC / Linux.do 登录和算力点功能。下面只列出当前实际使用的字段；后端为兼容上游可能仍返回空的 `membership`、`payment`、`modelCosts`、`auth.oidc`、`auth.linuxDo` 等字段，可忽略。
+
 ## public.value
 
 ```json
 {
   "modelChannel": {
     "availableModels": ["gpt-5.5", "gpt-image-2"],
-    "modelCosts": [
-      { "model": "gpt-5.5", "credits": 1 },
-      { "model": "gpt-image-2", "credits": 10 }
-    ],
     "defaultModel": "gpt-image-2",
     "defaultImageModel": "gpt-image-2",
     "defaultTextModel": "gpt-5.5",
@@ -29,10 +27,7 @@ description: settings 表中 public 和 private 配置结构说明
     "allowCustomChannel": true
   },
   "auth": {
-    "allowRegister": true,
-    "linuxDo": {
-      "enabled": false
-    }
+    "allowRegister": true
   }
 }
 ```
@@ -47,19 +42,11 @@ description: settings 表中 public 和 private 配置结构说明
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `availableModels` | string[] | 系统可用模型；保存设置时会自动合并所有已启用私有渠道的模型 |
-| `modelCosts` | object[] | 模型算力点配置，后端模型接口调用前按模型预扣，上游失败时返还；未配置默认不扣除 |
 | `defaultModel` | string | 默认模型，从 `availableModels` 中选择；为空或失效时优先选择文本模型 |
 | `defaultImageModel` | string | 默认图片模型，从 `availableModels` 中选择；为空或失效时优先选择 `seedream`、`image`、`gpt-image` 模型 |
 | `defaultTextModel` | string | 默认文本模型，从 `availableModels` 中选择；为空或失效时优先选择非图片模型 |
 | `systemPrompt` | string | 系统提示词 |
 | `allowCustomChannel` | boolean | 是否允许用户在配置弹窗中切换为本地直连渠道，默认允许 |
-
-`modelCosts` 每项字段：
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `model` | string | 模型名称 |
-| `credits` | number | 每次后端模型接口调用前预扣的算力点 |
 
 用户侧请求模式：
 
@@ -73,7 +60,6 @@ description: settings 表中 public 和 private 配置结构说明
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `allowRegister` | boolean | 是否允许用户注册，默认允许；关闭后注册入口隐藏，注册接口拒绝新用户创建 |
-| `linuxDo.enabled` | boolean | 是否开启 Linux.do 登录 |
 
 ## private.value
 

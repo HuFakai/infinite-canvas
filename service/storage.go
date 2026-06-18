@@ -108,6 +108,12 @@ type StorageCapacityResult struct {
 
 const defaultStorageCapacityLimitBytes int64 = 9 * 1024 * 1024 * 1024
 
+// s3HTTPClient 用于所有对象存储出站请求；带超时，避免用户自配的慢/挂死端点占满 goroutine。
+var s3HTTPClient = &http.Client{Timeout: 60 * time.Second}
+
+// maxStorageObjectBytes 限制单次下载读入内存的对象大小。
+const maxStorageObjectBytes = 100 << 20
+
 var (
 	storageCapacityCron *cron.Cron
 	storageCapacityOnce sync.Once
@@ -1048,7 +1054,7 @@ func DownloadStorageObject(id string) (DownloadedStorageObject, error) {
 
 	// 4. 降级方案：使用 HTTP GET 方式直接从 PublicURL 下载
 	if object.PublicURL != "" {
-		response, err := http.DefaultClient.Get(object.PublicURL)
+		response, err := s3HTTPClient.Get(object.PublicURL)
 		if err != nil {
 			return DownloadedStorageObject{}, err
 		}
@@ -1057,7 +1063,7 @@ func DownloadStorageObject(id string) (DownloadedStorageObject, error) {
 			body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 			return DownloadedStorageObject{}, fmt.Errorf("对象存储读取失败: %s %s", response.Status, string(body))
 		}
-		data, err := io.ReadAll(response.Body)
+		data, err := io.ReadAll(io.LimitReader(response.Body, maxStorageObjectBytes))
 		if err != nil {
 			return DownloadedStorageObject{}, err
 		}
@@ -1091,7 +1097,7 @@ func putS3Object(provider model.StorageProvider, objectKey string, contentType s
 			return err
 		}
 		request.Header.Set("Content-Type", contentType)
-		response, err := http.DefaultClient.Do(request)
+		response, err := s3HTTPClient.Do(request)
 		if err != nil {
 			lastErr = err
 			if attempt < len(delays) && isRetryableS3PutError(err) {
@@ -1132,7 +1138,7 @@ func getS3Object(provider model.StorageProvider, objectKey string) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := s3HTTPClient.Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -1140,7 +1146,7 @@ func getS3Object(provider model.StorageProvider, objectKey string) ([]byte, erro
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, fmt.Errorf("对象读取失败: %s", response.Status)
 	}
-	return io.ReadAll(response.Body)
+	return io.ReadAll(io.LimitReader(response.Body, maxStorageObjectBytes))
 }
 
 func deleteS3Object(provider model.StorageProvider, objectKey string) error {
@@ -1148,7 +1154,7 @@ func deleteS3Object(provider model.StorageProvider, objectKey string) error {
 	if err != nil {
 		return err
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := s3HTTPClient.Do(request)
 	if err != nil {
 		return err
 	}
@@ -1176,7 +1182,7 @@ func measureS3Provider(provider model.StorageProvider) (int64, error) {
 		if err != nil {
 			return 0, err
 		}
-		response, err := http.DefaultClient.Do(request)
+		response, err := s3HTTPClient.Do(request)
 		if err != nil {
 			return 0, err
 		}
@@ -1223,11 +1229,11 @@ func newS3RequestWithQuery(method string, provider model.StorageProvider, object
 	if contentLength > 0 {
 		request.ContentLength = contentLength
 	}
-	signS3Request(request, provider, escapedKey)
+	signS3Request(request, provider)
 	return request, nil
 }
 
-func signS3Request(request *http.Request, provider model.StorageProvider, objectKey string) {
+func signS3Request(request *http.Request, provider model.StorageProvider) {
 	nowTime := time.Now().UTC()
 	amzDate := nowTime.Format("20060102T150405Z")
 	dateStamp := nowTime.Format("20060102")
@@ -1239,7 +1245,12 @@ func signS3Request(request *http.Request, provider model.StorageProvider, object
 	request.Header.Set("Host", request.URL.Host)
 	request.Header.Set("X-Amz-Date", amzDate)
 	request.Header.Set("X-Amz-Content-Sha256", payloadHash)
-	canonicalURI := "/" + provider.Bucket + "/" + strings.ReplaceAll(url.PathEscape(objectKey), "%2F", "/")
+	// 直接用即将发送的请求路径作为 canonical URI，确保签名路径与实际路径一致
+	// （修复 endpoint 含 path 前缀、以及不同转义实现差异导致的签名不匹配）。
+	canonicalURI := request.URL.EscapedPath()
+	if canonicalURI == "" {
+		canonicalURI = "/"
+	}
 	canonicalHeaders := "host:" + request.URL.Host + "\n" + "x-amz-content-sha256:" + payloadHash + "\n" + "x-amz-date:" + amzDate + "\n"
 	signedHeaders := "host;x-amz-content-sha256;x-amz-date"
 	canonicalRequest := request.Method + "\n" + canonicalURI + "\n" + request.URL.RawQuery + "\n" + canonicalHeaders + "\n" + signedHeaders + "\n" + payloadHash

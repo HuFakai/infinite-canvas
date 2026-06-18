@@ -50,8 +50,13 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates; \
     rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /app/data/prompts
+RUN mkdir -p /app/data/prompts \
+    && groupadd -r app && useradd -r -g app app \
+    && chown -R app:app /app
+USER app
 
 EXPOSE 13000
-# 先启动内部 Go API，再由 Next.js 提供页面并代理 /api/*。
-CMD ["sh", "-c", "PORT=18080 /app/server & cd /app/web && HOSTNAME=0.0.0.0 PORT=13000 API_BASE_URL=http://127.0.0.1:18080 npm run start"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD node -e "require('http').get('http://127.0.0.1:13000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+# 先启动内部 Go API，再由 Next.js 提供页面并代理 /api/*；任一进程退出则容器退出，交由编排器重启。
+CMD ["bash", "-c", "PORT=18080 /app/server & API_PID=$!; cd /app/web && HOSTNAME=0.0.0.0 PORT=13000 API_BASE_URL=http://127.0.0.1:18080 npm run start & WEB_PID=$!; wait -n; kill $API_PID $WEB_PID 2>/dev/null; exit 1"]

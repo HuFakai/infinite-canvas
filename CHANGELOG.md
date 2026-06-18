@@ -2,6 +2,18 @@
 
 ## Unreleased
 
++ [安全] 修复 `/api/proxy-image` 未鉴权 SSRF：在连接层拦截内网/环回/链路本地（含云元数据 `169.254.169.254`）/CGNAT 地址并逐跳校验重定向，限制响应为 `image/*` 且限制大小，补 `X-Content-Type-Options: nosniff`。
++ [安全] 文件下载 `/api/files/:id/content` 按白名单净化 Content-Type：仅图片/音视频内联，其余（含可内嵌脚本的 SVG、HTML）强制 `application/octet-stream` + `Content-Disposition: attachment` 并补 `nosniff`，消除上传文件造成的同源存储型 XSS。
++ [安全] AI 代理请求体与文件上传增加大小上限（`http.MaxBytesReader`），对象存储下载增加 `io.LimitReader`，避免内存耗尽。
++ [安全] 所有 S3/对象存储出站请求改用带超时的 HTTP 客户端，避免用户自配的慢/挂死端点占满 goroutine。
++ [安全] 登录增加按用户名的失败计数与退避锁定，并对不存在用户做等时 bcrypt 比对，缓解暴力破解与用户枚举。
++ [安全] `User.Password` 改为 `json:"-"`，避免序列化泄露密码哈希；修正手写 S3 SigV4 签名的 canonical URI 按实际请求路径签名。
++ [调整] 管理员账号以 `.env`（`ADMIN_USERNAME` / `ADMIN_PASSWORD`）为唯一来源，启动时校正既有管理员（改名/改密），无需手动改库。
++ [调整] 前端彻底移除会员、支付（ZPay/支付宝/微信）、OIDC / Linux.do 登录配置入口和算力点/扣点显示；后端结构体作为兼容残留保留，保存设置时不会清空已存密钥。
++ [调整] 清理零引用死代码并 `go mod tidy` 移除支付相关依赖。
++ [运维] Dockerfile 改为非 root 运行、增加 `/api/health` HEALTHCHECK、任一进程退出即容器退出；统一以 `bun.lock` 为唯一前端锁文件，CI 改用 bun。
++ [文档] 新增《最佳实践》文档；更新 README、功能介绍、数据库说明、系统配置、本地开发等文档以反映私有化版本现状。
+
 ## v0.3.4 - 2026-06-13
 
 + [调整] 当前分支拆分为纯生图平台，视频/音频合并成果已保存在 `codex/video-audio-upstream-v0.3.3`，本分支不再保留视频创作台、音频生成、视频/音频节点和相关接口。

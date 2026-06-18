@@ -52,6 +52,15 @@ func HasAdmin() (bool, error) {
 	return total > 0, err
 }
 
+// FirstAdmin 返回系统中的首个管理员，用于启动时按 .env 校正凭据。
+func FirstAdmin() (model.User, bool, error) {
+	db, err := DB()
+	if err != nil {
+		return model.User{}, false, err
+	}
+	return findUser(db, "role = ?", model.UserRoleAdmin)
+}
+
 // GetUserByID 根据 ID 查询用户。
 func GetUserByID(id string) (model.User, bool, error) {
 	db, err := DB()
@@ -86,24 +95,6 @@ func DeleteUser(id string) error {
 		return err
 	}
 	return db.Delete(&model.User{}, "id = ?", id).Error
-}
-
-// GetUserByLinuxDoID 根据 Linux.do ID 查询用户。
-func GetUserByLinuxDoID(id string) (model.User, bool, error) {
-	db, err := DB()
-	if err != nil {
-		return model.User{}, false, err
-	}
-	return findUser(db, "linux_do_id = ?", id)
-}
-
-// GetUserByOIDCSub 根据 OIDC sub 查询用户。
-func GetUserByOIDCSub(sub string) (model.User, bool, error) {
-	db, err := DB()
-	if err != nil {
-		return model.User{}, false, err
-	}
-	return findUser(db, "oidc_sub = ?", sub)
 }
 
 // findUser 查询单个用户，并将未命中转换为 ok=false。

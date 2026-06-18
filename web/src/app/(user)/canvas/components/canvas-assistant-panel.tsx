@@ -43,7 +43,6 @@ type CanvasAssistantPanelProps = {
 export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeSessionId, onSelectNodeIds, onSessionsChange, onInsertImage, onInsertText, onPasteImage, onCollapseStart, onCollapse }: CanvasAssistantPanelProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const effectiveConfig = useEffectiveConfig();
-    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
@@ -358,7 +357,6 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
                         }}
                         onPasteImage={onPasteImage}
                         onPickAsset={() => setAssetPickerOpen(true)}
-                        modelCosts={modelCosts}
                     />
                 ) : null}
 
@@ -405,7 +403,6 @@ function AssistantComposer({
     onRemoveReference,
     onPasteImage,
     onPickAsset,
-    modelCosts,
 }: {
     mode: AssistantMode;
     prompt: string;
@@ -420,7 +417,6 @@ function AssistantComposer({
     onRemoveReference: (id: string) => void;
     onPasteImage: (file: File) => void;
     onPickAsset: () => void;
-    modelCosts?: { model: string; credits: number }[];
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const activeModel = mode === "image" ? config.imageModel || config.model : config.textModel || config.model;

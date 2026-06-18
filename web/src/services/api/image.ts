@@ -530,9 +530,12 @@ async function parseResponsesStreamResponse(response: Response, mime: string): P
             output.push(item as Record<string, unknown>);
         }
     });
-    const combinedOutput = [...((completedPayload?.output || []) as Record<string, unknown>[]), ...output];
+    // completedPayload 仅在上面的 SSE 回调闭包内赋值，TS 无法跨闭包追踪，会把它误判为 null（再经 ?. 收窄为 never）；
+    // 显式断言回声明类型后再读取，运行时行为不变。
+    const resolvedPayload = completedPayload as ResponsesApiResponse | null;
+    const combinedOutput = [...((resolvedPayload?.output || []) as Record<string, unknown>[]), ...output];
     try {
-        return parseResponsesPayload({ ...(completedPayload || {}), output: combinedOutput }, mime);
+        return parseResponsesPayload({ ...(resolvedPayload || {}), output: combinedOutput }, mime);
     } catch (error) {
         if (!partialImages.length) {
             throw new ImageRequestError(error instanceof Error ? error.message : "Responses API 没有返回图片", {

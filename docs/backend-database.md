@@ -17,8 +17,8 @@ description: 当前后端主要数据表与字段说明
 - `storage_objects`
 - `user_configs`
 - `creative_workflows`
-- `membership_plans`
-- `membership_orders`
+
+> 私有化版本移除了会员、支付、OIDC/Linux.do 登录和排行榜功能。`users`、`credit_logs`、`settings` 中与这些功能相关的列/字段（`credits`、`aff_*`、`github_id`、`linux_do_id`、`wechat_id`、`oidc_sub`、settings 的 `membership`/`payment`/`auth.oidc`/`auth.linuxDo`/`modelCosts` 等）作为上游 schema 残留保留，但当前不再写入或使用；`membership_plans`、`membership_orders` 表已不再迁移。
 
 ## users
 
@@ -33,9 +33,7 @@ description: 当前后端主要数据表与字段说明
 | `display_name` | string | 昵称 |
 | `avatar_url` | string | 头像地址 |
 | `role` | string | 角色：`user`、`admin` |
-| `credits` | number | 算力点余额 |
-| `membership_level` | string | 会员等级：`free`、`vip`、`svip` |
-| `membership_expires_at` | string | 会员过期时间 |
+| `credits` | number | 算力点余额（私有版未使用，保留列） |
 | `aff_code` | string | 用户邀请码，唯一索引 |
 | `aff_count` | number | 已邀请用户数量 |
 | `inviter_id` | string | 邀请人用户 ID |
@@ -57,7 +55,7 @@ description: 当前后端主要数据表与字段说明
 | --- | --- | --- |
 | `id` | string | 主键 |
 | `user_id` | string | 关联用户 ID |
-| `type` | string | `admin_adjust`、`ai_consume`、`ai_refund`、`membership_grant` |
+| `type` | string | `admin_adjust`、`ai_consume`、`ai_refund` |
 | `amount` | number | 本次变动数量 |
 | `balance` | number | 变动后的余额 |
 | `related_id` | string | 关联业务 ID |
@@ -109,16 +107,14 @@ description: 当前后端主要数据表与字段说明
 | --- | --- | --- |
 | `site` | object | 站点名称、描述、Logo、favicon、版权 |
 | `modelChannel` | object | 模型渠道公开配置 |
-| `auth` | object | 注册、Linux.do、OIDC 登录公开开关 |
+| `auth` | object | 注册开关（私有版已移除 Linux.do/OIDC 登录，对应字段保留为空） |
 | `storage` | object | 当前存储模式和是否允许用户自定义对象存储 |
-| `membership` | object | 会员中心开关、支付方式和提示文案 |
 
 `modelChannel` 主要字段：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `availableModels` | string[] | 系统可用模型列表 |
-| `modelCosts` | object[] | 模型算力点配置 |
 | `channels` | object[] | 前端可见的渠道摘要 |
 | `defaultModel` | string | 默认模型 |
 | `defaultImageModel` | string | 默认图片模型 |
@@ -134,11 +130,9 @@ description: 当前后端主要数据表与字段说明
 | `channels` | object[] | 后端模型渠道列表和密钥 |
 | `promptSync` | object | GitHub 远程提示词定时同步配置 |
 | `aiLog` | object | AI 日志上报和自动清理配置 |
-| `auth` | object | Linux.do 和 OIDC 私有密钥配置 |
 | `storage` | object | 后台 S3/R2 对象存储配置 |
-| `payment` | object | ZPay、支付宝、微信支付私有配置 |
 
-后端返回管理员设置时会隐藏渠道密钥、对象存储密钥、OAuth/OIDC 密钥和支付密钥；保存时留空表示沿用已保存密钥。
+后端返回管理员设置时会隐藏渠道密钥和对象存储密钥；保存时留空表示沿用已保存密钥。
 
 ## storage_objects
 
@@ -191,53 +185,6 @@ description: 当前后端主要数据表与字段说明
 | `created_at` | string | 创建时间 |
 | `updated_at` | string | 更新时间 |
 | `last_run_at` | string | 最近运行时间 |
-
-## membership_plans
-
-会员套餐表。
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | string | 主键 |
-| `name` | string | 套餐名称 |
-| `level` | string | 会员等级 |
-| `description` | string | 描述 |
-| `price` | number | 价格，单位分 |
-| `duration_days` | number | 有效天数 |
-| `credits_granted` | number | 赠送算力点 |
-| `unlimited` | bool | 会员期内是否不限算力点扣费 |
-| `priority_queue` | bool | 是否优先队列 |
-| `features` | text | 功能 key JSON 文本 |
-| `enabled` | bool | 是否启用 |
-| `sort` | number | 排序 |
-| `created_at` | string | 创建时间 |
-| `updated_at` | string | 更新时间 |
-
-## membership_orders
-
-会员订单表。
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | string | 主键 |
-| `user_id` | string | 用户 ID |
-| `plan_id` | string | 套餐 ID |
-| `plan_name` | string | 下单时套餐名称 |
-| `plan_level` | string | 下单时套餐等级 |
-| `amount` | number | 金额，单位分 |
-| `status` | string | `pending`、`paid`、`cancelled` |
-| `payment_provider` | string | `wechat`、`alipay`、`mock` |
-| `payment_id` | string | 第三方支付流水或平台订单号 |
-| `pay_url` | string | 支付跳转 URL、微信 code_url 或支付宝收款二维码内容 |
-| `pay_mode` | string | 支付呈现方式，`qrcode` 或 `redirect` |
-| `paid_at` | string | 支付时间 |
-| `expires_at` | string | 订单过期时间 |
-| `created_at` | string | 创建时间 |
-| `updated_at` | string | 更新时间 |
-
-## 生图排行榜
-
-生图排行榜当前由接口查询统计结果返回，不单独创建迁移表。返回结构包含用户 ID、用户名、昵称、头像和生图次数。
 
 ## AI 调用日志
 

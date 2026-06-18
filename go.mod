@@ -6,9 +6,7 @@ require (
 	github.com/caarlos0/env/v11 v11.3.1
 	github.com/gin-gonic/gin v1.11.0
 	github.com/glebarez/sqlite v1.11.0
-	github.com/go-sql-driver/mysql v1.8.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/jackc/pgx/v5 v5.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/crypto v0.48.0
@@ -18,11 +16,8 @@ require (
 )
 
 require (
-	github.com/smartwalle/alipay/v3 v3.2.29 // indirect
-	github.com/smartwalle/ncrypto v1.0.4 // indirect
-	github.com/smartwalle/ngx v1.1.0 // indirect
-	github.com/smartwalle/nsign v1.0.9 // indirect
-	github.com/wechatpay-apiv3/wechatpay-go v0.2.21 // indirect
+	github.com/go-sql-driver/mysql v1.8.1 // indirect
+	github.com/jackc/pgx/v5 v5.6.0 // indirect
 )
 
 require (

@@ -14,6 +14,7 @@
 
 ## 开发文档
 
+- [最佳实践](best-practices.md)
 - [接口响应约定](api-response.md)
 - [系统配置数据结构](system-settings.md)
 - [后端数据库说明](backend-database.md)

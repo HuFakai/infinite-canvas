@@ -97,7 +97,6 @@ export default function AdminAICallLogsPage() {
             { title: "渠道", dataIndex: "channelName", width: 150, ellipsis: true, render: (_: string, item: AdminAICallLog) => item.channelName || item.channelId || "-" },
             { title: "状态", dataIndex: "status", width: 90, render: (status: number) => <Tag color={status >= 200 && status < 400 ? "success" : "error"}>{status || "失败"}</Tag> },
             { title: "耗时", dataIndex: "durationMs", width: 110, render: (value: number) => formatDuration(value) },
-            { title: "扣点", dataIndex: "credits", width: 80 },
             {
                 title: "操作",
                 key: "actions",

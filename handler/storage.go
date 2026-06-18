@@ -197,10 +197,13 @@ func DraftUserWorkflow(w http.ResponseWriter, r *http.Request) {
 	OK(w, result)
 }
 
+const maxUploadBytes = 50 << 20
+
 func UploadFile(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes+1)
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		Fail(w, "请选择要上传的文件")
+		Fail(w, "文件过大或上传格式不正确")
 		return
 	}
 	defer file.Close()
@@ -244,6 +247,22 @@ func DeleteFile(w http.ResponseWriter, r *http.Request, id string) {
 	OK(w, true)
 }
 
+// safeDownloadContentType 限制 /api/files/:id/content 回显的 Content-Type，
+// 防止用户上传声称 text/html 等可执行类型的文件造成同源存储型 XSS。
+// 仅图片/音视频按原类型内联返回；其余（含可内嵌脚本的 SVG）一律按附件下载。
+func safeDownloadContentType(mimeType string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
+	if normalized == "image/svg+xml" {
+		return "application/octet-stream", false
+	}
+	if strings.HasPrefix(normalized, "image/") ||
+		strings.HasPrefix(normalized, "video/") ||
+		strings.HasPrefix(normalized, "audio/") {
+		return normalized, true
+	}
+	return "application/octet-stream", false
+}
+
 func FileContent(w http.ResponseWriter, r *http.Request, id string) {
 	download, err := service.DownloadStorageObject(id)
 	if err != nil {
@@ -254,7 +273,12 @@ func FileContent(w http.ResponseWriter, r *http.Request, id string) {
 		http.Redirect(w, r, download.RedirectURL, http.StatusTemporaryRedirect)
 		return
 	}
-	w.Header().Set("Content-Type", download.Object.MimeType)
+	contentType, inline := safeDownloadContentType(download.Object.MimeType)
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if !inline {
+		w.Header().Set("Content-Disposition", "attachment")
+	}
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	_, _ = w.Write(download.Data)
 }
@@ -285,6 +309,8 @@ func AdminMeasureStorageProvider(w http.ResponseWriter, r *http.Request) {
 	OK(w, result)
 }
 
+const proxyImageMaxBytes = 30 << 20
+
 func ProxyImage(w http.ResponseWriter, r *http.Request) {
 	targetURL := r.URL.Query().Get("url")
 	if targetURL == "" {
@@ -294,9 +320,6 @@ func ProxyImage(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
 		Fail(w, "无效的 url")
 		return
-	}
-	client := &http.Client{
-		Timeout: 30 * time.Second,
 	}
 	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
 	if err != nil {
@@ -310,9 +333,11 @@ func ProxyImage(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Pragma", "no-cache")
 
-	resp, err := client.Do(req)
+	// 经 SSRF 安全客户端发起：拒绝内网/环回/元数据地址，限制重定向与跳数。
+	resp, err := newSSRFSafeClient(30 * time.Second).Do(req)
 	if err != nil {
-		FailError(w, err)
+		// 不回传底层错误，避免暴露内网探测结果（连接被拒 / 超时等差异）。
+		FailWithStatus(w, http.StatusBadGateway, "代理图片请求失败")
 		return
 	}
 	defer resp.Body.Close()
@@ -321,12 +346,14 @@ func ProxyImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	contentType := resp.Header.Get("Content-Type")
-	if contentType != "" {
-		w.Header().Set("Content-Type", contentType)
-	} else {
-		w.Header().Set("Content-Type", "application/octet-stream")
+	// 仅允许图片，避免被当作开放代理转发任意内容
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "image/") {
+		FailWithStatus(w, http.StatusBadGateway, "代理目标不是图片")
+		return
 	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, io.LimitReader(resp.Body, proxyImageMaxBytes))
 }

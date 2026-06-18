@@ -34,7 +34,10 @@ func AdminSettings(w http.ResponseWriter, r *http.Request) {
 
 func AdminSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var settings model.Settings
-	_ = json.NewDecoder(r.Body).Decode(&settings)
+	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
+		Fail(w, "配置内容格式错误")
+		return
+	}
 	result, err := service.SaveSettings(settings)
 	if err != nil {
 		FailError(w, err)

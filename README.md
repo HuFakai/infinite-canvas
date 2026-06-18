@@ -4,7 +4,9 @@
 
 <h1 align="center">无限画布 (infinite-canvas)</h1>
 
-无限画布是一款面向 AI 生图创作的开源工作台。本仓库是基于 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 二次开发的纯生图分支，重点增强了生图工作台、画布图片工具、创作工作流、账号同步、S3/R2 对象存储、会员/支付/OIDC 和部署文档，适合个人服务器或小团队自托管使用。
+无限画布是一款面向 AI 生图创作的开源工作台。本仓库是基于 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 二次开发的纯生图分支，重点增强了生图工作台、画布图片工具、创作工作流、账号同步、S3/R2 对象存储和部署文档，适合个人服务器或小团队自托管使用。
+
+本分支为**私有化部署版本**：已移除会员、支付（ZPay/支付宝/微信）、生图排行榜、邀请返佣、OIDC / Linux.do 登录等面向公开运营的能力，只保留用户名/密码登录与核心创作功能。
 
 视频/音频能力已经从当前分支移除；需要完整视频/音频合并成果的用户可使用分支 `codex/video-audio-upstream-v0.3.3`。
 
@@ -21,7 +23,7 @@
 - 创作工作流：支持公开/个人模板、变量表单、AI 创建工作流、单图/多图系列工作流、参考图输入和结果自动进入生图历史。
 - 画布助手：围绕选中节点和上游节点对话、生图，并把结果插回画布。
 - 提示词与素材：提示词库、服务器素材库和“我的素材”可在生图、画布 AI 和工作流中复用。
-- 会员与支付：合入上游 PR #43 的会员套餐、订单、ZPay/支付宝/微信配置、OIDC 登录、生图排行榜和站点配置。
+- 站点与账号：可自定义站点名称、Logo、favicon 和描述；用户名/密码登录，支持开关用户注册；账号配置与数据快照同步。
 - 存储：保留浏览器 IndexedDB，本版本新增 SQLite 元数据 + S3/R2 图片对象存储，可配置 Cloudflare R2。
 
 完整功能说明见 [docs/features.md](docs/features.md)。
@@ -85,8 +87,8 @@ go run .
 
 ```bash
 cd web
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 运行后默认端口 13000，可访问 `http://localhost:13000`。

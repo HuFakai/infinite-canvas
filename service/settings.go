@@ -398,6 +398,9 @@ func SelectModelChannelForModel(modelName string, channelID string) (model.Model
 	for _, channel := range channels {
 		total += channel.Weight
 	}
+	if total <= 0 {
+		return channels[0], nil
+	}
 	hit := rand.Intn(total)
 	for _, channel := range channels {
 		hit -= channel.Weight

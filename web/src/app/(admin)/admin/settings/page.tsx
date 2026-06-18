@@ -7,7 +7,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { EditorView } from "@uiw/react-codemirror";
 
-import { fetchAdminSettings, fetchChannelModels, measureAdminStorageProvider, saveAdminSettings, testChannelModel, type AdminModelChannel, type AdminModelCost, type AdminSettings, type AdminStorageProvider } from "@/services/api/admin";
+import { fetchAdminSettings, fetchChannelModels, measureAdminStorageProvider, saveAdminSettings, testChannelModel, type AdminModelChannel, type AdminSettings, type AdminStorageProvider } from "@/services/api/admin";
 import { useUserStore } from "@/stores/use-user-store";
 
 const CodeMirror = dynamic(() => import("@uiw/react-codemirror"), { ssr: false });
@@ -29,7 +29,6 @@ const emptySettings: AdminSettings = {
         site: { name: "无限画布", subtitle: "", description: "一个无限画布创作工具", logoUrl: "", faviconUrl: "", copyright: "" },
         modelChannel: {
             availableModels: [],
-            modelCosts: [],
             channels: [],
             defaultModel: "",
             defaultImageModel: "",
@@ -38,24 +37,14 @@ const emptySettings: AdminSettings = {
             systemPrompts: { image: "", text: "", workflow: "", workflowAgent: "" },
             allowCustomChannel: true,
         },
-        auth: { allowRegister: true, linuxDo: { enabled: false }, oidc: { enabled: false, displayName: "", iconUrl: "" } },
+        auth: { allowRegister: true },
         storage: { mode: "local_indexeddb", allowUserProvider: false },
-        membership: { enabled: false, paymentMethods: [], serviceNotice: "" },
     },
     private: {
         channels: [],
         promptSync: { enabled: true, cron: "*/5 * * * *" },
         aiLog: { localDirectReportEnabled: false, cleanup: { enabled: false, retentionDays: 14, cron: "0 3 * * *" } },
-        auth: {
-            linuxDo: { clientId: "", clientSecret: "" },
-            oidc: { issuer: "", clientId: "", clientSecret: "", scopes: "openid profile email", usernameClaim: "", displayNameClaim: "", avatarClaim: "" },
-        },
         storage: { mode: "local_indexeddb", allowUserProvider: false, providers: [], roundRobinCursor: 0, capacityCheck: { enabled: false, cron: "0 */6 * * *" }, capacityLimitBytes: 9 * 1024 * 1024 * 1024 },
-        payment: {
-            zpay: { enabled: false, pid: "", key: "", gatewayUrl: "", notifyUrl: "", returnUrl: "" },
-            alipay: { enabled: false, appId: "", privateKey: "", publicKey: "", gatewayUrl: "", notifyUrl: "", returnUrl: "", sandbox: false },
-            wechat: { enabled: false, appId: "", mchId: "", apiKey: "", apiV3Key: "", notifyUrl: "", serialNo: "", mchPrivateKey: "" },
-        },
     },
 };
 const emptyChannel: AdminModelChannel = { id: "", protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, timeout: 600, enabled: true, remark: "" };
@@ -92,7 +81,6 @@ export default function AdminSettingsPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [measuringProviderIndex, setMeasuringProviderIndex] = useState<number | null>(null);
-    const [modelCosts, setModelCosts] = useState<AdminModelCost[]>([]);
     const [knownModels, setKnownModels] = useState<string[]>([]);
     const publicModels = Form.useWatch(["public", "modelChannel", "availableModels"], form) || [];
     const channelModels = useMemo(() => collectChannelModels(channels), [channels]);
@@ -114,7 +102,6 @@ export default function AdminSettingsPage() {
             const data = normalizeSettings(await fetchAdminSettings(token));
             form.setFieldsValue(data);
             setChannels(data.private.channels);
-            setModelCosts(data.public.modelChannel.modelCosts);
             setKnownModels(collectKnownModels(data));
             setJsonText({
                 public: JSON.stringify(data.public, null, 2),
@@ -147,7 +134,6 @@ export default function AdminSettingsPage() {
             const merged = mergeChannelApiKeys(values.private.channels, saved);
             form.setFieldsValue(merged);
             setChannels(merged.private.channels);
-            setModelCosts(merged.public.modelChannel.modelCosts);
             rememberKnownModels(merged);
             setJsonText({
                 public: JSON.stringify(merged.public, null, 2),
@@ -177,7 +163,6 @@ export default function AdminSettingsPage() {
         }
         form.setFieldsValue({ [tab]: parsed } as Partial<AdminSettings>);
         if (tab === "private") setChannels((parsed as AdminSettings["private"]).channels);
-        if (tab === "public") setModelCosts((parsed as AdminSettings["public"]).modelChannel.modelCosts);
         rememberKnownModels({ ...normalizeSettings(form.getFieldsValue(true) as AdminSettings), [tab]: parsed });
         setEditorMode((current) => ({ ...current, [tab]: nextMode }));
     };
@@ -188,7 +173,6 @@ export default function AdminSettingsPage() {
             message.error("JSON 格式不正确");
             return;
         }
-        if (tab === "public") setModelCosts((parsed as AdminSettings["public"]).modelChannel.modelCosts);
         setJsonText((current) => ({
             ...current,
             [tab]: JSON.stringify(parsed, null, 2),
@@ -363,7 +347,6 @@ export default function AdminSettingsPage() {
         const saved = normalizeSettings(await saveAdminSettings(token, nextSettings));
         const merged = mergeChannelApiKeys(nextChannels, saved);
         setChannels(merged.private.channels);
-        setModelCosts(merged.public.modelChannel.modelCosts);
         rememberKnownModels(merged);
         form.setFieldsValue(merged);
         setJsonText({
@@ -538,31 +521,6 @@ export default function AdminSettingsPage() {
                                             <Switch />
                                         </Form.Item>
                                     </Col>
-                                    <Col span={24}>
-                                        <Typography.Title level={5}>模型算力点</Typography.Title>
-                                        <Table
-                                            rowKey="model"
-                                            pagination={false}
-                                            size="small"
-                                            dataSource={publicModels.map((model) => ({ model, credits: modelCostCredits(modelCosts, model) }))}
-                                            columns={[
-                                                { title: "模型", dataIndex: "model" },
-                                                {
-                                                    title: "每次调用扣除",
-                                                    dataIndex: "credits",
-                                                    width: 220,
-                                                    render: (_, item) => (
-                                                        <Space.Compact className="!w-full">
-                                                            <InputNumber min={0} step={1} precision={0} className="!w-full" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
-                                                            <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
-                                                                点
-                                                            </span>
-                                                        </Space.Compact>
-                                                    ),
-                                                },
-                                            ]}
-                                        />
-                                    </Col>
                                 </Row>
                             </Form>
                         ) : (
@@ -581,100 +539,6 @@ export default function AdminSettingsPage() {
                     ) : activeMode === "visual" ? (
                         <Form form={form} layout="vertical" initialValues={emptySettings} requiredMark={false}>
                             <Flex vertical gap={12}>
-                                <Card
-                                    size="small"
-                                    title={
-                                        <Space>
-                                            <img src="/icons/linuxdo.svg" alt="" width={18} height={18} />
-                                            Linux.do 登录
-                                        </Space>
-                                    }
-                                >
-                                    <Flex vertical gap={14}>
-                                        <Typography.Text type="secondary">
-                                            本项目接口回调地址是 /api/auth/linux-do/callback，请在 Linux.do 应用后台自行拼接站点前缀。
-                                            <Typography.Link href="https://connect.linux.do" target="_blank" rel="noreferrer">
-                                                点击此处管理你的 LinuxDO OAuth App
-                                            </Typography.Link>
-                                        </Typography.Text>
-                                        <Row gutter={16}>
-                                            <Col xs={24} md={6}>
-                                                <Form.Item name={["public", "auth", "linuxDo", "enabled"]} label="开启 Linux.do 登录" valuePropName="checked">
-                                                    <Switch />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={9}>
-                                                <Form.Item name={["private", "auth", "linuxDo", "clientId"]} label="Linux.do Client ID">
-                                                    <Input placeholder="输入 Linux.do OAuth App 的 ID" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={9}>
-                                                <Form.Item name={["private", "auth", "linuxDo", "clientSecret"]} label="Linux.do Client Secret">
-                                                    <Input.Password placeholder="留空则沿用已保存的密钥" />
-                                                </Form.Item>
-                                            </Col>
-                                        </Row>
-                                    </Flex>
-                                </Card>
-                                <Card size="small" title="OIDC 登录">
-                                    <Flex vertical gap={14}>
-                                        <Typography.Text type="secondary">
-                                            通用 OIDC（OpenID Connect）登录，适配 Authentik、Keycloak、Casdoor、Auth0 等。本系统回调地址为 /api/auth/oidc/callback，请在 IdP 应用后台添加完整 URL（含站点前缀）。
-                                        </Typography.Text>
-                                        <Row gutter={16}>
-                                            <Col xs={24} md={6}>
-                                                <Form.Item name={["public", "auth", "oidc", "enabled"]} label="开启 OIDC 登录" valuePropName="checked">
-                                                    <Switch />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={9}>
-                                                <Form.Item name={["public", "auth", "oidc", "displayName"]} label="按钮显示名称">
-                                                    <Input placeholder="例如 公司 SSO、Keycloak、Authentik" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={9}>
-                                                <Form.Item name={["public", "auth", "oidc", "iconUrl"]} label="按钮图标 URL（可选）">
-                                                    <Input placeholder="https://example.com/icon.svg" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24}>
-                                                <Form.Item name={["private", "auth", "oidc", "issuer"]} label="Issuer" extra="OIDC 自动发现地址前缀，如 https://sso.example.com/realms/master">
-                                                    <Input placeholder="https://sso.example.com/realms/master" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={12}>
-                                                <Form.Item name={["private", "auth", "oidc", "clientId"]} label="Client ID">
-                                                    <Input placeholder="IdP 应用的 Client ID" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={12}>
-                                                <Form.Item name={["private", "auth", "oidc", "clientSecret"]} label="Client Secret">
-                                                    <Input.Password placeholder="留空则沿用已保存的密钥" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={6}>
-                                                <Form.Item name={["private", "auth", "oidc", "scopes"]} label="Scopes" extra="留空默认 openid profile email">
-                                                    <Input placeholder="openid profile email" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={6}>
-                                                <Form.Item name={["private", "auth", "oidc", "usernameClaim"]} label="用户名 claim" extra="留空按 preferred_username → email → name 顺序">
-                                                    <Input placeholder="preferred_username" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={6}>
-                                                <Form.Item name={["private", "auth", "oidc", "displayNameClaim"]} label="昵称 claim">
-                                                    <Input placeholder="name" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={6}>
-                                                <Form.Item name={["private", "auth", "oidc", "avatarClaim"]} label="头像 claim">
-                                                    <Input placeholder="picture" />
-                                                </Form.Item>
-                                            </Col>
-                                        </Row>
-                                    </Flex>
-                                </Card>
                                 <Card size="small" title="提示词定时同步">
                                     <Row gutter={16} align="middle">
                                         <Col xs={24} md={8}>
@@ -709,35 +573,6 @@ export default function AdminSettingsPage() {
                                         <Col xs={24} md={6}>
                                             <Form.Item name={["private", "aiLog", "cleanup", "cron"]} label="清理 Cron">
                                                 <Input placeholder="0 3 * * *" />
-                                            </Form.Item>
-                                        </Col>
-                                    </Row>
-                                </Card>
-                                <Card size="small" title="会员功能">
-                                    <Row gutter={16}>
-                                        <Col xs={24} md={6}>
-                                            <Form.Item name={["public", "membership", "enabled"]} label="开启会员中心" valuePropName="checked">
-                                                <Switch />
-                                            </Form.Item>
-                                        </Col>
-                                        <Col xs={24} md={18}>
-                                            <Form.Item
-                                                name={["public", "membership", "paymentMethods"]}
-                                                label="支持的支付方式"
-                                                extra="留空时按 ZPay 默认渠道处理"
-                                            >
-                                                <Checkbox.Group
-                                                    options={[
-                                                        { label: "支付宝", value: "alipay" },
-                                                        { label: "微信支付", value: "wechat" },
-                                                        { label: "模拟支付（仅本地调试）", value: "mock" },
-                                                    ]}
-                                                />
-                                            </Form.Item>
-                                        </Col>
-                                        <Col xs={24}>
-                                            <Form.Item name={["public", "membership", "serviceNotice"]} label="会员中心提示文案">
-                                                <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder="可填写会员服务说明、客服联系方式等" />
                                             </Form.Item>
                                         </Col>
                                     </Row>
@@ -862,143 +697,6 @@ export default function AdminSettingsPage() {
                                             </Flex>
                                         )}
                                     </Form.List>
-                                </Card>
-                                <Card size="small" title="ZPay 聚合支付">
-                                    <Flex vertical gap={14}>
-                                        <Typography.Text type="secondary">
-                                            ZPay（https://zpayz.cn）页面跳转支付。异步回调地址默认走 /api/payments/zpay/notify，同步回调默认走 /api/payments/zpay/return；如部署在反向代理后，请填写带域名的完整地址。
-                                        </Typography.Text>
-                                        <Row gutter={16}>
-                                            <Col xs={24} md={6}>
-                                                <Form.Item name={["private", "payment", "zpay", "enabled"]} label="启用 ZPay" valuePropName="checked">
-                                                    <Switch />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={9}>
-                                                <Form.Item name={["private", "payment", "zpay", "pid"]} label="商户 PID">
-                                                    <Input placeholder="ZPay 后台分配的商户 ID" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={9}>
-                                                <Form.Item name={["private", "payment", "zpay", "key"]} label="商户密钥">
-                                                    <Input.Password placeholder="留空则沿用已保存的密钥" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={8}>
-                                                <Form.Item name={["private", "payment", "zpay", "gatewayUrl"]} label="支付网关" extra="默认 https://zpayz.cn/submit.php">
-                                                    <Input placeholder="https://zpayz.cn/submit.php" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={8}>
-                                                <Form.Item name={["private", "payment", "zpay", "notifyUrl"]} label="异步回调地址（notify_url）">
-                                                    <Input placeholder="https://your-domain/api/payments/zpay/notify" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={8}>
-                                                <Form.Item name={["private", "payment", "zpay", "returnUrl"]} label="同步跳转地址（return_url）">
-                                                    <Input placeholder="https://your-domain/api/payments/zpay/return" />
-                                                </Form.Item>
-                                            </Col>
-                                        </Row>
-                                    </Flex>
-                                </Card>
-                                <Card size="small" title="支付宝扫码支付">
-                                    <Flex vertical gap={14}>
-                                        <Typography.Text type="secondary">
-                                            支付宝官方当面付扫码支付，需要 AppID、应用私钥、支付宝公钥（来自支付宝开放平台）和公网异步通知地址。下单由服务端生成收款二维码内容，前端展示二维码，权益发放以异步通知验签结果为准。
-                                        </Typography.Text>
-                                        <Row gutter={16}>
-                                            <Col xs={24} md={6}>
-                                                <Form.Item name={["private", "payment", "alipay", "enabled"]} label="启用支付宝直连" valuePropName="checked">
-                                                    <Switch />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={6}>
-                                                <Form.Item name={["private", "payment", "alipay", "sandbox"]} label="沙箱环境" valuePropName="checked">
-                                                    <Switch />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={12}>
-                                                <Form.Item name={["private", "payment", "alipay", "appId"]} label="AppID">
-                                                    <Input placeholder="2021000000000000" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={12}>
-                                                <Form.Item name={["private", "payment", "alipay", "privateKey"]} label="应用私钥（RSA2）">
-                                                    <Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} placeholder="留空则沿用已保存的密钥；直接粘贴开放平台应用私钥" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={12}>
-                                                <Form.Item name={["private", "payment", "alipay", "publicKey"]} label="支付宝公钥">
-                                                    <Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} placeholder="从开放平台获取的支付宝公钥，用于回调验签" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={8}>
-                                                <Form.Item name={["private", "payment", "alipay", "gatewayUrl"]} label="网关地址" extra="留空默认 openapi.alipay.com">
-                                                    <Input placeholder="https://openapi.alipay.com/gateway.do" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={8}>
-                                                <Form.Item name={["private", "payment", "alipay", "notifyUrl"]} label="异步通知地址（notify_url）">
-                                                    <Input placeholder="https://your-domain/api/payments/alipay/notify" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={8}>
-                                                <Form.Item name={["private", "payment", "alipay", "returnUrl"]} label="同步跳转地址（扫码支付可留空）">
-                                                    <Input placeholder="https://your-domain/api/payments/alipay/return" />
-                                                </Form.Item>
-                                            </Col>
-                                        </Row>
-                                    </Flex>
-                                </Card>
-                                <Card size="small" title="微信支付直连">
-                                    <Flex vertical gap={14}>
-                                        <Typography.Text type="secondary">
-                                            微信支付 V3 商户接入。需 AppID、商户号 MchID、APIv3 密钥、商户证书序列号和商户私钥（apiclient_key.pem 内容）。下单走 Native 扫码，前端会用 code_url 渲染二维码。
-                                        </Typography.Text>
-                                        <Row gutter={16}>
-                                            <Col xs={24} md={6}>
-                                                <Form.Item name={["private", "payment", "wechat", "enabled"]} label="启用微信支付" valuePropName="checked">
-                                                    <Switch />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={9}>
-                                                <Form.Item name={["private", "payment", "wechat", "appId"]} label="AppID">
-                                                    <Input placeholder="wx1234567890abcdef" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={9}>
-                                                <Form.Item name={["private", "payment", "wechat", "mchId"]} label="商户号 MchID">
-                                                    <Input placeholder="1612345678" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={12}>
-                                                <Form.Item name={["private", "payment", "wechat", "apiKey"]} label="APIv2 密钥（兼容，可选）">
-                                                    <Input.Password placeholder="留空则沿用已保存的密钥" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={12}>
-                                                <Form.Item name={["private", "payment", "wechat", "apiV3Key"]} label="APIv3 密钥（必填）">
-                                                    <Input.Password placeholder="32 位 APIv3 密钥，留空则沿用已保存的密钥" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={12}>
-                                                <Form.Item name={["private", "payment", "wechat", "serialNo"]} label="商户证书序列号（必填）">
-                                                    <Input placeholder="证书 serial number" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24} md={12}>
-                                                <Form.Item name={["private", "payment", "wechat", "notifyUrl"]} label="异步通知地址（必填）">
-                                                    <Input placeholder="https://your-domain/api/payments/wechat/notify" />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={24}>
-                                                <Form.Item name={["private", "payment", "wechat", "mchPrivateKey"]} label="商户私钥 apiclient_key.pem（必填）">
-                                                    <Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} placeholder="留空则沿用已保存的密钥；直接粘贴 -----BEGIN PRIVATE KEY----- 开头的内容" />
-                                                </Form.Item>
-                                            </Col>
-                                        </Row>
-                                    </Flex>
                                 </Card>
                                 <Button type="primary" icon={<PlusOutlined />} onClick={() => openChannelDrawer(null)}>
                                     新增渠道
@@ -1303,7 +1001,6 @@ function normalizePublicSetting(setting: Partial<AdminSettings["public"]> = {}):
             ...emptySettings.public.modelChannel,
             ...(setting.modelChannel || {}),
             availableModels: setting.modelChannel?.availableModels || [],
-            modelCosts: normalizeModelCosts(setting.modelChannel?.modelCosts || []),
             channels: setting.modelChannel?.channels || [],
             systemPrompts: {
                 ...emptySettings.public.modelChannel.systemPrompts,
@@ -1315,29 +1012,12 @@ function normalizePublicSetting(setting: Partial<AdminSettings["public"]> = {}):
         },
         auth: {
             allowRegister: setting.auth?.allowRegister !== false,
-            linuxDo: {
-                enabled: setting.auth?.linuxDo?.enabled === true,
-            },
-            oidc: {
-                enabled: setting.auth?.oidc?.enabled === true,
-                displayName: setting.auth?.oidc?.displayName || "",
-                iconUrl: setting.auth?.oidc?.iconUrl || "",
-            },
-        },
-        membership: {
-            enabled: setting.membership?.enabled === true,
-            paymentMethods: setting.membership?.paymentMethods || [],
-            serviceNotice: setting.membership?.serviceNotice || "",
         },
         storage: {
             mode: setting.storage?.mode || "local_indexeddb",
             allowUserProvider: setting.storage?.allowUserProvider === true,
         },
     };
-}
-
-function normalizeModelCosts(items: Partial<AdminSettings["public"]["modelChannel"]["modelCosts"][number]>[]) {
-    return items.filter((item) => item.model).map((item) => ({ model: item.model || "", credits: Math.max(0, Number(item.credits) || 0) }));
 }
 
 function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}): AdminSettings["private"] {
@@ -1353,51 +1033,6 @@ function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}
                 enabled: setting.aiLog?.cleanup?.enabled === true,
                 retentionDays: Number(setting.aiLog?.cleanup?.retentionDays) || 14,
                 cron: setting.aiLog?.cleanup?.cron || "0 3 * * *",
-            },
-        },
-        auth: {
-            linuxDo: {
-                clientId: setting.auth?.linuxDo?.clientId || "",
-                clientSecret: setting.auth?.linuxDo?.clientSecret || "",
-            },
-            oidc: {
-                issuer: setting.auth?.oidc?.issuer || "",
-                clientId: setting.auth?.oidc?.clientId || "",
-                clientSecret: setting.auth?.oidc?.clientSecret || "",
-                scopes: setting.auth?.oidc?.scopes || "openid profile email",
-                usernameClaim: setting.auth?.oidc?.usernameClaim || "",
-                displayNameClaim: setting.auth?.oidc?.displayNameClaim || "",
-                avatarClaim: setting.auth?.oidc?.avatarClaim || "",
-            },
-        },
-        payment: {
-            zpay: {
-                enabled: setting.payment?.zpay?.enabled === true,
-                pid: setting.payment?.zpay?.pid || "",
-                key: setting.payment?.zpay?.key || "",
-                gatewayUrl: setting.payment?.zpay?.gatewayUrl || "",
-                notifyUrl: setting.payment?.zpay?.notifyUrl || "",
-                returnUrl: setting.payment?.zpay?.returnUrl || "",
-            },
-            alipay: {
-                enabled: setting.payment?.alipay?.enabled === true,
-                appId: setting.payment?.alipay?.appId || "",
-                privateKey: setting.payment?.alipay?.privateKey || "",
-                publicKey: setting.payment?.alipay?.publicKey || "",
-                gatewayUrl: setting.payment?.alipay?.gatewayUrl || "",
-                notifyUrl: setting.payment?.alipay?.notifyUrl || "",
-                returnUrl: setting.payment?.alipay?.returnUrl || "",
-                sandbox: setting.payment?.alipay?.sandbox === true,
-            },
-            wechat: {
-                enabled: setting.payment?.wechat?.enabled === true,
-                appId: setting.payment?.wechat?.appId || "",
-                mchId: setting.payment?.wechat?.mchId || "",
-                apiKey: setting.payment?.wechat?.apiKey || "",
-                apiV3Key: setting.payment?.wechat?.apiV3Key || "",
-                notifyUrl: setting.payment?.wechat?.notifyUrl || "",
-                serialNo: setting.payment?.wechat?.serialNo || "",
-                mchPrivateKey: setting.payment?.wechat?.mchPrivateKey || "",
             },
         },
         storage: {
@@ -1444,18 +1079,6 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
     };
 }
 
-function modelCostCredits(items: AdminSettings["public"]["modelChannel"]["modelCosts"], model: string) {
-    return items.find((item) => item.model === model)?.credits || 0;
-}
-
-function setModelCost(form: any, setModelCosts: (items: AdminModelCost[]) => void, model: string, credits: number) {
-    const current = (form.getFieldValue(["public", "modelChannel", "modelCosts"]) || []) as AdminSettings["public"]["modelChannel"]["modelCosts"];
-    const next = current.filter((item) => item.model !== model);
-    next.push({ model, credits: Math.max(0, credits) });
-    form.setFieldValue(["public", "modelChannel", "modelCosts"], next);
-    setModelCosts(next);
-}
-
 function mergeChannelApiKeys(currentChannels: AdminModelChannel[], saved: AdminSettings): AdminSettings {
     const channels = saved.private.channels.map((item, index) => ({
         ...item,
@@ -1472,7 +1095,7 @@ function collectChannelModels(channels: AdminModelChannel[]) {
 }
 
 function collectKnownModels(settings: AdminSettings) {
-    return uniqueModels([...(settings.public.modelChannel.availableModels || []), ...(settings.public.modelChannel.modelCosts || []).map((item) => item.model), ...settings.private.channels.flatMap((channel) => channel.models || [])]);
+    return uniqueModels([...(settings.public.modelChannel.availableModels || []), ...settings.private.channels.flatMap((channel) => channel.models || [])]);
 }
 
 function buildModelSelectGroups(sourceModels: string[], existingModels: string[]): Record<ModelSelectTabKey, string[]> {

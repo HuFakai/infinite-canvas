@@ -21,7 +21,6 @@ export type AdminAICallLog = {
     channelName: string;
     status: number;
     durationMs: number;
-    credits: number;
     requestBody: string;
     responseBody: string;
     error: string;
@@ -134,7 +133,6 @@ export type AdminModelChannel = {
 
 export type AdminPublicModelChannelSettings = {
     availableModels: string[];
-    modelCosts: AdminModelCost[];
     channels: AdminPublicModelChannelInfo[];
     defaultModel: string;
     defaultImageModel: string;
@@ -160,11 +158,6 @@ export type AdminPublicModelChannelInfo = {
     remark: string;
 };
 
-export type AdminModelCost = {
-    model: string;
-    credits: number;
-};
-
 export type AdminPublicSettings = {
     site: {
         name: string;
@@ -177,19 +170,6 @@ export type AdminPublicSettings = {
     modelChannel: AdminPublicModelChannelSettings;
     auth: {
         allowRegister: boolean;
-        linuxDo: {
-            enabled: boolean;
-        };
-        oidc: {
-            enabled: boolean;
-            displayName: string;
-            iconUrl: string;
-        };
-    };
-    membership: {
-        enabled: boolean;
-        paymentMethods: string[];
-        serviceNotice: string;
     };
     storage: {
         mode: string;
@@ -228,51 +208,6 @@ export type AdminPrivateSettings = {
             enabled: boolean;
             retentionDays: number;
             cron: string;
-        };
-    };
-    auth: {
-        linuxDo: {
-            clientId: string;
-            clientSecret: string;
-        };
-        oidc: {
-            issuer: string;
-            clientId: string;
-            clientSecret: string;
-            scopes: string;
-            usernameClaim: string;
-            displayNameClaim: string;
-            avatarClaim: string;
-        };
-    };
-    payment: {
-        zpay: {
-            enabled: boolean;
-            pid: string;
-            key: string;
-            gatewayUrl: string;
-            notifyUrl: string;
-            returnUrl: string;
-        };
-        alipay: {
-            enabled: boolean;
-            appId: string;
-            privateKey: string;
-            publicKey: string;
-            gatewayUrl: string;
-            notifyUrl: string;
-            returnUrl: string;
-            sandbox: boolean;
-        };
-        wechat: {
-            enabled: boolean;
-            appId: string;
-            mchId: string;
-            apiKey: string;
-            apiV3Key: string;
-            notifyUrl: string;
-            serialNo: string;
-            mchPrivateKey: string;
         };
     };
     storage: {

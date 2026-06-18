@@ -10,7 +10,6 @@ export type AuthUser = {
     displayName: string;
     avatarUrl: string;
     role: UserRole;
-    credits: number;
     createdAt: string;
     updatedAt: string;
 };
