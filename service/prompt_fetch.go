@@ -140,8 +140,8 @@ func buildJSONSourcePrompts(source model.PromptJSONSource) ([]model.Prompt, erro
 			ID:       source.ID + "-" + id,
 			Title:    title,
 			Prompt:   prompt,
-			CoverURL: optionalJSONText(record["coverUrl"]),
-			Preview:  optionalJSONText(record["preview"]),
+			CoverURL: optionalJSONText(record, "coverUrl"),
+			Preview:  optionalJSONText(record, "preview"),
 			Tags:     stringList(record["tags"]),
 		})
 	}
