@@ -13,6 +13,7 @@ export enum CanvasNodeType {
     Image = "image",
     Text = "text",
     Config = "config",
+    Group = "group",
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
@@ -43,12 +44,15 @@ export type CanvasNodeMetadata = {
     retryAttempts?: string;
     references?: string[];
     maskDataUrl?: string;
+    maskSourceStorageKey?: string;
     naturalWidth?: number;
     naturalHeight?: number;
     freeResize?: boolean;
     isBatchRoot?: boolean;
     batchRootId?: string;
     batchChildIds?: string[];
+    groupChildIds?: string[];
+    groupId?: string;
     batchUsesReferenceImages?: boolean;
     primaryImageId?: string;
     imageBatchExpanded?: boolean;

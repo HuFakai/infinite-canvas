@@ -10,6 +10,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -86,7 +87,12 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		proxyGeminiAIRequest(w, r, path, body, contentType, channel, logContext, refund)
 		return
 	}
-	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, service.BuildModelChannelURL(channel, path), bytes.NewReader(body))
+	requestPath := path
+	useImageAdapter := strings.HasPrefix(path, "/images/") && channel.ImageAdapter != nil && channel.ImageAdapter.Enabled
+	if useImageAdapter && strings.TrimSpace(channel.ImageAdapter.CreatePath) != "" {
+		requestPath = channel.ImageAdapter.CreatePath
+	}
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, service.BuildModelChannelURL(channel, requestPath), bytes.NewReader(body))
 	if err != nil {
 		log.Printf("AI proxy build request failed: url=%s err=%v", service.BuildModelChannelURL(channel, path), err)
 		refund()
@@ -96,6 +102,10 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
 	if contentType != "" {
 		request.Header.Set("Content-Type", contentType)
+	}
+	if useImageAdapter {
+		copyDeclarativeImageResponse(w, r, request, channel, logContext, refund)
+		return
 	}
 	copyAIResponse(w, request, channel, logContext, refund)
 }
@@ -181,6 +191,217 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, channel model.
 		}
 	}
 	saveAIProxyLog(logContext, status, result.Body, errorMessage, chargedCredits)
+}
+
+func copyDeclarativeImageResponse(w http.ResponseWriter, sourceRequest *http.Request, request *http.Request, channel model.ModelChannel, logContext aiLogContext, onFailure func()) {
+	keepalive := startAIClientKeepalive(w, true)
+	payload, status, err := requestImageAdapterJSON(request, channel)
+	if err == nil {
+		payload, err = pollImageAdapterResult(sourceRequest, channel, payload)
+	}
+	if err != nil {
+		if onFailure != nil {
+			onFailure()
+		}
+		message := err.Error()
+		saveAIProxyLog(logContext, status, marshalLogJSON(payload), message, 0)
+		writeAIProxyError(w, keepalive, firstPositive(status, http.StatusBadGateway), message)
+		return
+	}
+	images := imageAdapterResults(payload, channel.ImageAdapter.ResultPaths)
+	if len(images) == 0 {
+		if onFailure != nil {
+			onFailure()
+		}
+		message := firstNonEmpty(imageAdapterError(payload, channel.ImageAdapter.ErrorPaths), "AI 接口未返回有效图片")
+		saveAIProxyLog(logContext, http.StatusBadGateway, marshalLogJSON(payload), message, 0)
+		writeAIProxyError(w, keepalive, http.StatusBadGateway, message)
+		return
+	}
+	data := make([]map[string]string, 0, len(images))
+	for _, image := range images {
+		if strings.HasPrefix(image, "http://") || strings.HasPrefix(image, "https://") || strings.HasPrefix(image, "data:") {
+			data = append(data, map[string]string{"url": image})
+		} else {
+			data = append(data, map[string]string{"b64_json": image})
+		}
+	}
+	encoded, _ := json.Marshal(map[string]any{"data": data})
+	keepalive.Stop()
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write(encoded)
+	chargedCredits := min(logContext.Credits, len(images)*logContext.UnitCredits)
+	if refundCredits := logContext.Credits - chargedCredits; refundCredits > 0 {
+		_ = service.RefundUserCredits(logContext.UserID, logContext.Model, refundCredits, logContext.Endpoint, logContext.Channel)
+	}
+	saveAIProxyLog(logContext, http.StatusOK, string(encoded), "", chargedCredits)
+}
+
+func requestImageAdapterJSON(request *http.Request, channel model.ModelChannel) (map[string]any, int, error) {
+	response, err := service.HTTPClientForChannel(channel).Do(request)
+	if err != nil {
+		return nil, http.StatusBadGateway, err
+	}
+	defer response.Body.Close()
+	body, readErr := io.ReadAll(response.Body)
+	if readErr != nil {
+		return nil, response.StatusCode, readErr
+	}
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) != nil {
+		return nil, response.StatusCode, fmt.Errorf("异步渠道返回了无效 JSON")
+	}
+	if response.StatusCode >= http.StatusBadRequest {
+		return payload, response.StatusCode, fmt.Errorf("%s", readUpstreamAIErrorMessage(body, response.StatusCode))
+	}
+	return payload, response.StatusCode, nil
+}
+
+func pollImageAdapterResult(sourceRequest *http.Request, channel model.ModelChannel, payload map[string]any) (map[string]any, error) {
+	adapter := channel.ImageAdapter
+	if len(imageAdapterResults(payload, adapter.ResultPaths)) > 0 {
+		return payload, nil
+	}
+	taskID := adapterStringAt(payload, adapter.TaskIDPath)
+	if taskID == "" || adapter.StatusPath == "" {
+		return payload, nil
+	}
+	for attempt := 0; attempt < adapter.MaxAttempts; attempt++ {
+		select {
+		case <-sourceRequest.Context().Done():
+			return payload, sourceRequest.Context().Err()
+		case <-time.After(time.Duration(adapter.PollInterval) * time.Millisecond):
+		}
+		path := strings.ReplaceAll(adapter.StatusPath, "{task_id}", url.PathEscape(taskID))
+		request, err := http.NewRequestWithContext(sourceRequest.Context(), http.MethodGet, service.BuildModelChannelURL(channel, path), nil)
+		if err != nil {
+			return payload, err
+		}
+		request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+		next, _, err := requestImageAdapterJSON(request, channel)
+		if err != nil {
+			return next, err
+		}
+		payload = next
+		status := strings.ToLower(adapterStringAt(payload, adapter.StatusField))
+		if containsFold(adapter.FailureValues, status) {
+			return payload, fmt.Errorf("%s", firstNonEmpty(imageAdapterError(payload, adapter.ErrorPaths), "异步生图任务失败"))
+		}
+		if containsFold(adapter.SuccessValues, status) || len(imageAdapterResults(payload, adapter.ResultPaths)) > 0 {
+			return payload, nil
+		}
+	}
+	return payload, fmt.Errorf("异步生图任务轮询超时")
+}
+
+func imageAdapterResults(payload map[string]any, paths []string) []string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, path := range paths {
+		for _, value := range collectAdapterImages(valueAtJSONPath(payload, path), true) {
+			value = strings.TrimSpace(value)
+			if value != "" && !seen[value] {
+				seen[value] = true
+				result = append(result, value)
+			}
+		}
+	}
+	return result
+}
+
+func collectAdapterImages(value any, direct bool) []string {
+	switch typed := value.(type) {
+	case string:
+		if direct && isAdapterImageString(typed) {
+			return []string{typed}
+		}
+	case []any:
+		result := []string{}
+		for _, item := range typed {
+			result = append(result, collectAdapterImages(item, true)...)
+		}
+		return result
+	case map[string]any:
+		result := []string{}
+		for _, key := range []string{"url", "image_url", "b64_json", "base64", "image", "images", "result", "results", "output"} {
+			if item, ok := typed[key]; ok {
+				result = append(result, collectAdapterImages(item, true)...)
+			}
+		}
+		return result
+	}
+	return nil
+}
+
+func isAdapterImageString(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "http://") ||
+		strings.HasPrefix(value, "https://") ||
+		strings.HasPrefix(value, "data:image/") ||
+		len(value) >= 64 && looksLikeBase64(value)
+}
+
+func imageAdapterError(payload map[string]any, paths []string) string {
+	for _, path := range paths {
+		if value := adapterStringAt(payload, path); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func adapterStringAt(payload map[string]any, path string) string {
+	value := valueAtJSONPath(payload, path)
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return ""
+}
+
+func valueAtJSONPath(value any, path string) any {
+	current := value
+	for _, part := range strings.Split(strings.TrimSpace(path), ".") {
+		record, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = record[part]
+	}
+	return current
+}
+
+func containsFold(values []string, target string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return http.StatusBadGateway
+}
+
+func marshalLogJSON(value any) string {
+	encoded, _ := json.Marshal(value)
+	if len(encoded) <= 64*1024 {
+		return string(encoded)
+	}
+	var cloned any
+	if json.Unmarshal(encoded, &cloned) == nil {
+		redactLargeImages(&cloned)
+		encoded, _ = json.Marshal(cloned)
+	}
+	if len(encoded) > 64*1024 {
+		encoded = encoded[:64*1024]
+	}
+	return string(encoded)
 }
 
 func proxyGeminiAIRequest(w http.ResponseWriter, r *http.Request, path string, body []byte, contentType string, channel model.ModelChannel, logContext aiLogContext, onFailure func()) {

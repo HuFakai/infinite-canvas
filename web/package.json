@@ -7,6 +7,7 @@
         "dev": "next dev --webpack -H 0.0.0.0 -p 13000",
         "build": "next build",
         "start": "next start -H 0.0.0.0 -p 13000",
+        "mock:image-api": "node scripts/mock-image-api.mjs",
         "format": "prettier --write .",
         "format:check": "prettier --check ."
     },

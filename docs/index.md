@@ -18,16 +18,19 @@
 - [系统配置数据结构](system-settings.md)
 - [后端数据库说明](backend-database.md)
 - [画布数据结构](canvas-data-structure.md)
+- [图片接口故障模拟器](image-api-fixtures.md)
 
 ## 合并与差异
 
 - [纯生图拆分与 PR #43 合并说明](upstream-merge-v0.3.3.md)
 - [上游非视频音频功能合并说明](upstream-non-av-agent-gemini.md)
+- [上游与生图参考项目功能审查](upstream-and-playground-review.md)
 
 ## 项目进度
 
 - [待测试](pending-test.md)
 - [TODO](todo.md)
+- [v0.3.6 候选发布说明](release-v0.3.6-draft.md)
 
 ## 说明
 

@@ -15,7 +15,7 @@ import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
+import { cropDataUrl, resolveUpscaleSize, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
 import { App, Button, Dropdown, Image, Modal } from "antd";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
@@ -27,6 +27,7 @@ import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "../component
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "../components/canvas-node-crop-dialog";
 import { CanvasNodeMaskEditDialog, type CanvasImageMaskEditPayload } from "../components/canvas-node-mask-edit-dialog";
 import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "../components/canvas-node-split-dialog";
+import { CanvasNodeSuperResolveDialog, type CanvasImageSuperResolveParams } from "../components/canvas-node-super-resolve-dialog";
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "../components/canvas-node-upscale-dialog";
 import { buildNodeChatMessages, buildNodeGenerationContext, buildNodeGenerationInputs, hydrateNodeGenerationContext, type NodeGenerationInput } from "../components/canvas-node-generation";
 import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "../components/canvas-node-hover-toolbar";
@@ -35,10 +36,12 @@ import { Minimap } from "../components/canvas-mini-map";
 import { CanvasNode } from "../components/canvas-node";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "../components/canvas-node-prompt-panel";
 import { CanvasToolbar } from "../components/canvas-toolbar";
+import { CanvasSidePanel } from "../components/canvas-side-panel";
 import { AssetPickerModal, type AssetPickerTab, type InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
+import { exportCanvasNodes } from "../utils/canvas-export";
 import {
     CanvasNodeType,
     type CanvasAssistantImage,
@@ -280,6 +283,8 @@ function InfiniteCanvasPage() {
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
     const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);
+    const [superResolveNodeId, setSuperResolveNodeId] = useState<string | null>(null);
+    const [superResolveLoading, setSuperResolveLoading] = useState(false);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
     const [previewZoom, setPreviewZoom] = useState<number>(1);
     const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -659,13 +664,15 @@ function InfiniteCanvasPage() {
         }),
         [connections, currentProject?.title, nodes, projectId, selectedNodeIds, viewport],
     );
-    const toolbarNode = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
+    const toolbarNodeCandidate = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
+    const toolbarNode = toolbarNodeCandidate?.type === CanvasNodeType.Group ? null : toolbarNodeCandidate;
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const maskEditNode = maskEditNodeId ? nodeById.get(maskEditNodeId) || null : null;
     const splitNode = splitNodeId ? nodeById.get(splitNodeId) || null : null;
     const upscaleNode = upscaleNodeId ? nodeById.get(upscaleNodeId) || null : null;
+    const superResolveNode = superResolveNodeId ? nodeById.get(superResolveNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const activeNodeId = hasMultipleSelectedNodes ? null : hoveredNodeId || (selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null);
@@ -764,7 +771,13 @@ function InfiniteCanvasPage() {
             if (disposableKeys.length) void deleteStoredImages(disposableKeys).catch((error) => message.error(error instanceof Error ? error.message : "图片文件删除失败"));
             setNodes((prev) => {
                 const next = prev.filter((node) => !allIds.has(node.id));
-                return next.map((node) => {
+                return layoutCanvasGroups(next.map((node) => {
+                    if (node.metadata?.groupId && allIds.has(node.metadata.groupId)) {
+                        return { ...node, metadata: { ...node.metadata, groupId: undefined } };
+                    }
+                    if (node.type === CanvasNodeType.Group && node.metadata?.groupChildIds) {
+                        return { ...node, metadata: { ...node.metadata, groupChildIds: node.metadata.groupChildIds.filter((childId) => !allIds.has(childId)) } };
+                    }
                     const childIds = node.metadata?.batchChildIds?.filter((childId) => !allIds.has(childId));
                     if (!node.metadata?.isBatchRoot || childIds?.length === node.metadata.batchChildIds?.length) return node;
                     const primaryImageId = childIds?.includes(node.metadata.primaryImageId || "") ? node.metadata.primaryImageId : childIds?.[0];
@@ -781,7 +794,7 @@ function InfiniteCanvasPage() {
                             naturalHeight: primaryNode?.metadata?.naturalHeight || node.metadata.naturalHeight,
                         },
                     };
-                });
+                }));
             });
             setConnections((prev) => prev.filter((conn) => !allIds.has(conn.fromNodeId) && !allIds.has(conn.toNodeId)));
             setSelectedNodeIds(new Set());
@@ -795,6 +808,7 @@ function InfiniteCanvasPage() {
             setAngleNodeId((current) => (current && allIds.has(current) ? null : current));
             setMaskEditNodeId((current) => (current && allIds.has(current) ? null : current));
             setUpscaleNodeId((current) => (current && allIds.has(current) ? null : current));
+            setSuperResolveNodeId((current) => (current && allIds.has(current) ? null : current));
             setPreviewNodeId((current) => (current && allIds.has(current) ? null : current));
             setRunningNodeId((current) => (current && allIds.has(current) ? null : current));
             setContextMenu((current) => (current && allIds.has(current.nodeId) ? null : current));
@@ -823,6 +837,7 @@ function InfiniteCanvasPage() {
         setAngleNodeId(null);
         setMaskEditNodeId(null);
         setUpscaleNodeId(null);
+        setSuperResolveNodeId(null);
         setPreviewNodeId(null);
         setRunningNodeId(null);
         deselectCanvas();
@@ -832,7 +847,7 @@ function InfiniteCanvasPage() {
 
     const duplicateNode = useCallback((nodeId: string) => {
         const source = nodesRef.current.find((node) => node.id === nodeId);
-        if (!source) return;
+        if (!source || source.type === CanvasNodeType.Group) return;
 
         const id = `${source.type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const next: CanvasNodeData = {
@@ -846,6 +861,57 @@ function InfiniteCanvasPage() {
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
         setDialogNodeId(id);
+    }, []);
+
+    const groupSelectedNodes = useCallback(() => {
+        const selected = nodesRef.current.filter((node) => selectedNodeIdsRef.current.has(node.id) && node.type !== CanvasNodeType.Group);
+        if (selected.length < 2) return;
+        const bounds = selected.reduce(
+            (value, node) => ({
+                left: Math.min(value.left, node.position.x),
+                top: Math.min(value.top, node.position.y),
+                right: Math.max(value.right, node.position.x + node.width),
+                bottom: Math.max(value.bottom, node.position.y + node.height),
+            }),
+            { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+        );
+        const groupId = `group-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const groupNode: CanvasNodeData = {
+            id: groupId,
+            type: CanvasNodeType.Group,
+            title: "节点组",
+            position: { x: bounds.left - 36, y: bounds.top - 52 },
+            width: bounds.right - bounds.left + 72,
+            height: bounds.bottom - bounds.top + 88,
+            metadata: { status: NODE_STATUS_IDLE, groupChildIds: selected.map((node) => node.id) },
+        };
+        const selectedIds = new Set(selected.map((node) => node.id));
+        setNodes((prev) =>
+            layoutCanvasGroups([
+                groupNode,
+                ...prev.map((node) => {
+                    if (selectedIds.has(node.id)) return { ...node, metadata: { ...node.metadata, groupId } };
+                    if (node.type === CanvasNodeType.Group && node.metadata?.groupChildIds) {
+                        return { ...node, metadata: { ...node.metadata, groupChildIds: node.metadata.groupChildIds.filter((id) => !selectedIds.has(id)) } };
+                    }
+                    return node;
+                }),
+            ]),
+        );
+        setSelectedNodeIds(new Set([groupId]));
+        setSelectedConnectionId(null);
+    }, []);
+
+    const ungroupSelectedNode = useCallback(() => {
+        const group = nodesRef.current.find((node) => selectedNodeIdsRef.current.has(node.id) && node.type === CanvasNodeType.Group);
+        if (!group) return;
+        const childIds = new Set(group.metadata?.groupChildIds || []);
+        setNodes((prev) =>
+            prev
+                .filter((node) => node.id !== group.id)
+                .map((node) => (childIds.has(node.id) ? { ...node, metadata: { ...node.metadata, groupId: undefined } } : node)),
+        );
+        setSelectedNodeIds(childIds);
     }, []);
 
     const copySelectedNodes = useCallback(() => {
@@ -1048,7 +1114,9 @@ function InfiniteCanvasPage() {
         setSelectedNodeIds(nextSelected);
         const dragIds = new Set(nextSelected);
         currentNodes.forEach((node) => {
-            if (nextSelected.has(node.id)) node.metadata?.batchChildIds?.forEach((childId) => dragIds.add(childId));
+            if (!nextSelected.has(node.id)) return;
+            node.metadata?.batchChildIds?.forEach((childId) => dragIds.add(childId));
+            node.metadata?.groupChildIds?.forEach((childId) => dragIds.add(childId));
         });
         dragRef.current = {
             isDraggingNode: true,
@@ -1081,11 +1149,11 @@ function InfiniteCanvasPage() {
         setIsNodeDragging(false);
         if (dragRef.current.hasMoved && clientX != null && clientY != null) {
             setNodes((prev) =>
-                prev.map((node) => {
+                layoutCanvasGroups(prev.map((node) => {
                     const initial = initialPositions.find((item) => item.id === node.id);
                     if (!initial) return node;
                     return { ...node, position: { x: initial.x + dx, y: initial.y + dy } };
-                }),
+                })),
             );
         }
 
@@ -1214,33 +1282,45 @@ function InfiniteCanvasPage() {
         };
     }, [finishNodeDrag, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalPointerMove]);
 
-    const createImageFileNode = useCallback(async (file: File, position: Position) => {
-        const hideLoading = message.loading("正在上传图片...", 0);
+    const createImageFileNodes = useCallback(async (files: File[], position: Position) => {
+        if (!files.length) return [];
+        const hideLoading = message.loading(files.length > 1 ? `正在上传 ${files.length} 张图片...` : "正在上传图片...", 0);
         try {
-            const image = await uploadImage(file);
-            const size = fitNodeSize(image.width, image.height);
-            const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-            const newNode: CanvasNodeData = {
-                id,
-                type: CanvasNodeType.Image,
-                title: file.name,
-                position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
-                width: size.width,
-                height: size.height,
-                metadata: imageMetadata(image),
-            };
-
-            setNodes((prev) => [...prev, newNode]);
-            setSelectedNodeIds(new Set([id]));
+            const settled = await Promise.allSettled(
+                files.map(async (file, index) => {
+                    const image = await uploadImage(file);
+                    const nodeSize = fitNodeSize(image.width, image.height);
+                    const offset = index * 40;
+                    return {
+                        id: `image-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+                        type: CanvasNodeType.Image,
+                        title: file.name,
+                        position: { x: position.x - nodeSize.width / 2 + offset, y: position.y - nodeSize.height / 2 + offset },
+                        width: nodeSize.width,
+                        height: nodeSize.height,
+                        metadata: imageMetadata(image),
+                    } satisfies CanvasNodeData;
+                }),
+            );
+            const newNodes = settled.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+            const failedCount = settled.length - newNodes.length;
+            if (failedCount) message.warning(`${newNodes.length} 张上传成功，${failedCount} 张失败`);
+            if (!newNodes.length) return [];
+            setNodes((prev) => [...prev, ...newNodes]);
+            setSelectedNodeIds(new Set(newNodes.map((node) => node.id)));
             setSelectedConnectionId(null);
-            setDialogNodeId(id);
+            setDialogNodeId(newNodes.length === 1 ? newNodes[0].id : null);
+            return newNodes;
         } catch (error) {
             console.error("Upload image node failed:", error);
             message.error("图片上传失败");
+            return [];
         } finally {
             hideLoading();
         }
     }, [message]);
+
+    const createImageFileNode = useCallback((file: File, position: Position) => createImageFileNodes([file], position), [createImageFileNodes]);
 
     const createTextNodeFromClipboard = useCallback(
         (text: string) => {
@@ -1364,19 +1444,22 @@ function InfiniteCanvasPage() {
     );
 
     const handleNodeResize = useCallback((nodeId: string, width: number, height: number, position?: Position) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, width, height, position: position || node.position } : node)));
+        setNodes((prev) => {
+            const next = prev.map((node) => (node.id === nodeId ? { ...node, width, height, position: position || node.position } : node));
+            return prev.find((node) => node.id === nodeId)?.type === CanvasNodeType.Group ? next : layoutCanvasGroups(next);
+        });
     }, []);
 
     const toggleNodeFreeResize = useCallback((nodeId: string) => {
         setNodes((prev) =>
-            prev.map((node) => {
+            layoutCanvasGroups(prev.map((node) => {
                 if (node.id !== nodeId) return node;
                 const freeResize = !node.metadata?.freeResize;
                 if (freeResize || node.type !== CanvasNodeType.Image) return { ...node, metadata: { ...node.metadata, freeResize } };
                 const ratio = (node.metadata?.naturalWidth || node.width) / (node.metadata?.naturalHeight || node.height || 1);
                 const height = node.width / ratio;
                 return { ...node, height, position: { x: node.position.x, y: node.position.y + node.height / 2 - height / 2 }, metadata: { ...node.metadata, freeResize } };
-            }),
+            })),
         );
     }, []);
 
@@ -1510,6 +1593,22 @@ function InfiniteCanvasPage() {
         [addAsset, message],
     );
 
+    const exportSelectedNodes = useCallback(async () => {
+        const selected = nodesRef.current.filter((node) => selectedNodeIdsRef.current.has(node.id));
+        if (!selected.length) return;
+        const hideLoading = message.loading("正在整理选中内容...", 0);
+        try {
+            const selectedIds = new Set(selected.map((node) => node.id));
+            const selectedConnections = connectionsRef.current.filter((connection) => selectedIds.has(connection.fromNodeId) && selectedIds.has(connection.toNodeId));
+            await exportCanvasNodes(selected, selectedConnections, `${currentProject?.title || "画布"}-选中内容`);
+            message.success(`已导出 ${selected.length} 个节点`);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "导出失败");
+        } finally {
+            hideLoading();
+        }
+    }, [currentProject?.title, message]);
+
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
         if (!node.metadata?.content) return;
         const cropped = await cropDataUrl(node.metadata.content, crop);
@@ -1606,11 +1705,75 @@ function InfiniteCanvasPage() {
         }
     }, [message]);
 
+    const superResolveImageNode = useCallback(
+        async (node: CanvasNodeData, params: CanvasImageSuperResolveParams) => {
+            if (!node.metadata?.content || superResolveLoading) return;
+            setSuperResolveLoading(true);
+            const hideLoading = message.loading("AI 超分处理中...", 0);
+            try {
+                const sourceMeta = await readImageMeta(node.metadata.content);
+                const target = resolveUpscaleSize(sourceMeta.width, sourceMeta.height, params.targetLongEdge);
+                const config: AiConfig = {
+                    ...effectiveConfig,
+                    model: params.model,
+                    imageModel: params.model,
+                    imageChannelId: params.channelId,
+                    activeChannelId: params.channelId,
+                    size: `${target.width}x${target.height}`,
+                    quality: "high",
+                    outputFormat: "png",
+                    count: "1",
+                };
+                const reference: ReferenceImage = {
+                    id: node.id,
+                    name: `${node.title || "source"}.${imageExtension(node.metadata.mimeType || node.metadata.content)}`,
+                    type: node.metadata.mimeType || "image/png",
+                    dataUrl: node.metadata.content,
+                    storageKey: node.metadata.storageKey,
+                };
+                const startedAt = Date.now();
+                const result = (await requestEdit(config, params.prompt, [reference]))[0];
+                if (!result) throw new Error("AI 超分接口没有返回图片");
+                const uploaded = await uploadImage(result.dataUrl);
+                const nodeSize = fitNodeSize(uploaded.width, uploaded.height, 520, 520);
+                const childId = nanoid();
+                const child: CanvasNodeData = {
+                    id: childId,
+                    type: CanvasNodeType.Image,
+                    title: node.title ? `AI 超分 - ${node.title}` : "AI 超分结果",
+                    position: { x: node.position.x + node.width + 96, y: node.position.y },
+                    width: nodeSize.width,
+                    height: nodeSize.height,
+                    metadata: {
+                        ...imageMetadata(uploaded),
+                        ...buildImageGenerationMetadata("edit", config, 1, [reference]),
+                        prompt: params.prompt,
+                        imageChannelId: params.channelId,
+                        durationMs: Date.now() - startedAt,
+                    },
+                };
+                setNodes((prev) => [...prev, child]);
+                setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
+                setSelectedNodeIds(new Set([childId]));
+                setDialogNodeId(childId);
+                setSuperResolveNodeId(null);
+                message.success(`AI 超分完成：${uploaded.width} x ${uploaded.height}`);
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "AI 超分失败");
+            } finally {
+                hideLoading();
+                setSuperResolveLoading(false);
+            }
+        },
+        [effectiveConfig, message, superResolveLoading],
+    );
+
     const maskEditImageNode = useCallback(
-        (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
+        async (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
             if (!node.metadata?.content) return;
             const prompt = payload.prompt.trim();
             if (!prompt) return;
+            const maskSource = await uploadImage(payload.sourceDataUrl);
             const textId = nanoid();
             const configId = nanoid();
             const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
@@ -1650,6 +1813,7 @@ function InfiniteCanvasPage() {
                     count: 1,
                     inputOrder: [node.id, textId],
                     maskDataUrl: payload.maskDataUrl,
+                    maskSourceStorageKey: maskSource.storageKey,
                 },
             };
             setMaskEditNodeId(null);
@@ -1731,24 +1895,30 @@ function InfiniteCanvasPage() {
 
     const handleImageInputChange = useCallback(
         async (event: ReactChangeEvent<HTMLInputElement>) => {
-            const file = event.target.files?.[0];
+            const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith("image/"));
             const target = uploadTargetRef.current;
-            if (!file || !file.type.startsWith("image/")) return;
+            if (!files.length) {
+                uploadTargetRef.current = null;
+                event.target.value = "";
+                return;
+            }
 
             if (target?.nodeId) {
                 const hideLoading = message.loading("正在上传图片...", 0);
                 try {
-                    const image = await uploadImage(file);
-                    const size = fitNodeSize(image.width, image.height);
+                    const [first, ...rest] = files;
+                    const image = await uploadImage(first);
+                    const nextSize = fitNodeSize(image.width, image.height);
+                    const targetNode = nodesRef.current.find((node) => node.id === target.nodeId);
                     setNodes((prev) =>
                         prev.map((node) =>
                             node.id === target.nodeId
                                 ? {
                                       ...node,
                                       type: CanvasNodeType.Image,
-                                      title: file.name,
-                                      width: size.width,
-                                      height: size.height,
+                                      title: first.name,
+                                      width: nextSize.width,
+                                      height: nextSize.height,
                                       metadata: {
                                           ...node.metadata,
                                           ...imageMetadata(image),
@@ -1777,6 +1947,10 @@ function InfiniteCanvasPage() {
                     setSelectedNodeIds(new Set([target.nodeId]));
                     setSelectedConnectionId(null);
                     setDialogNodeId(target.nodeId);
+                    if (rest.length) {
+                        const center = targetNode ? { x: targetNode.position.x + targetNode.width / 2 + 40, y: targetNode.position.y + targetNode.height / 2 + 40 } : target.position || getCanvasCenter();
+                        await createImageFileNodes(rest, center);
+                    }
                 } catch (err) {
                     console.error("Canvas image upload error:", err);
                     message.error("图片上传失败");
@@ -1788,26 +1962,26 @@ function InfiniteCanvasPage() {
             } else {
                 try {
                     const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                    await createImageFileNode(file, position);
+                    await createImageFileNodes(files, position);
                 } finally {
                     uploadTargetRef.current = null;
                     event.target.value = "";
                 }
             }
         },
-        [createImageFileNode, screenToCanvas, size.height, size.width, message],
+        [createImageFileNodes, getCanvasCenter, message, screenToCanvas, size.height, size.width],
     );
 
     const handleDrop = useCallback(
         (event: ReactDragEvent<HTMLDivElement>) => {
             event.preventDefault();
-            const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/"));
-            if (!file) return;
+            const files = Array.from(event.dataTransfer.files).filter((item) => item.type.startsWith("image/"));
+            if (!files.length) return;
 
             const pos = screenToCanvas(event.clientX, event.clientY);
-            void createImageFileNode(file, pos);
+            void createImageFileNodes(files, pos);
         },
-        [createImageFileNode, screenToCanvas],
+        [createImageFileNodes, screenToCanvas],
     );
 
     const pasteAssistantImage = useCallback(
@@ -1918,8 +2092,14 @@ function InfiniteCanvasPage() {
                         isImageNode && sourceNode?.metadata?.content
                             ? [{ id: sourceNode.id, name: `${sourceNode.title || sourceNode.id}.png`, type: sourceNode.metadata.mimeType || "image/png", dataUrl: sourceNode.metadata.content, storageKey: sourceNode.metadata.storageKey }]
                             : [];
-                    const referenceImages = sourceReference.length ? sourceReference : generationContext.referenceImages;
                     const maskDataUrl = sourceNode?.metadata?.maskDataUrl;
+                    const maskSourceStorageKey = sourceNode?.metadata?.maskSourceStorageKey;
+                    const maskSourceUrl = maskSourceStorageKey ? await resolveImageUrl(maskSourceStorageKey, "") : "";
+                    if (maskSourceStorageKey && !maskSourceUrl) throw new Error("局部重绘工作图已丢失，请重新创建配置");
+                    const maskSourceReference = maskSourceUrl
+                        ? [{ id: `${sourceNode?.id || nodeId}-mask-source`, name: "mask-source.png", type: "image/png", dataUrl: maskSourceUrl, storageKey: maskSourceStorageKey }]
+                        : [];
+                    const referenceImages = maskSourceReference.length ? maskSourceReference : sourceReference.length ? sourceReference : generationContext.referenceImages;
                     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
                     const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages, maskDataUrl);
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
@@ -2553,6 +2733,21 @@ function InfiniteCanvasPage() {
         [insertAssistantImage, insertAssistantText, screenToCanvas, size.height, size.width],
     );
 
+    const focusSidePanelNode = useCallback(
+        (nodeId: string) => {
+            const node = nodesRef.current.find((item) => item.id === nodeId);
+            if (!node) return;
+            setSelectedNodeIds(new Set([nodeId]));
+            setSelectedConnectionId(null);
+            setViewport((current) => ({
+                ...current,
+                x: size.width / 2 - (node.position.x + node.width / 2) * current.k,
+                y: size.height / 2 - (node.position.y + node.height / 2) * current.k,
+            }));
+        },
+        [size.height, size.width],
+    );
+
     if (!projectLoaded) return <CanvasRefreshShell />;
 
     return (
@@ -2581,6 +2776,8 @@ function InfiniteCanvasPage() {
                         setAssistantCollapsed(false);
                     }}
                 />
+
+                <CanvasSidePanel nodes={nodes} selectedNodeIds={selectedNodeIds} onSelectNode={focusSidePanelNode} onInsertAsset={handleAssetInsert} onInsertPrompt={insertAssistantText} />
 
                 <InfiniteCanvas
                     containerRef={containerRef}
@@ -2738,7 +2935,7 @@ function InfiniteCanvasPage() {
                     onCrop={(node) => setCropNodeId(node.id)}
                     onSplit={(node) => setSplitNodeId(node.id)}
                     onUpscale={(node) => setUpscaleNodeId(node.id)}
-                    onSuperResolve={() => message.info("AI 超分暂未实现")}
+                    onSuperResolve={(node) => setSuperResolveNodeId(node.id)}
                     onAngle={(node) => setAngleNodeId(node.id)}
                     onViewImage={(node) => setPreviewNodeId(node.id)}
                     onReversePrompt={createImageReversePromptNodes}
@@ -2751,6 +2948,7 @@ function InfiniteCanvasPage() {
                     activeTool={activeTool}
                     onActiveToolChange={setActiveTool}
                     selectedCount={selectedNodeIds.size}
+                    canUngroup={selectedNodeIds.size === 1 && nodes.some((node) => selectedNodeIds.has(node.id) && node.type === CanvasNodeType.Group)}
                     canUndo={historyState.canUndo}
                     canRedo={historyState.canRedo}
                     backgroundMode={backgroundMode}
@@ -2761,6 +2959,9 @@ function InfiniteCanvasPage() {
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
                     onUpload={() => handleUploadRequest()}
+                    onExportSelected={() => void exportSelectedNodes()}
+                    onGroupSelected={groupSelectedNodes}
+                    onUngroupSelected={ungroupSelectedNode}
                     onDelete={() => deleteNodes(new Set(selectedNodeIds))}
                     onClear={() => setClearConfirmOpen(true)}
                     onDeselect={deselectCanvas}
@@ -2795,11 +2996,11 @@ function InfiniteCanvasPage() {
                     />
                 ) : null}
 
-                <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageInputChange} />
+                <input ref={imageInputRef} type="file" multiple accept="image/*" className="hidden" onChange={handleImageInputChange} />
 
                 <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => setInfoNodeId(null)} />
 
-                {maskEditNode?.metadata?.content ? <CanvasNodeMaskEditDialog dataUrl={maskEditNode.metadata.content} open={Boolean(maskEditNode)} onClose={() => setMaskEditNodeId(null)} onConfirm={(payload) => void maskEditImageNode(maskEditNode!, payload)} /> : null}
+                {maskEditNode?.metadata?.content ? <CanvasNodeMaskEditDialog dataUrl={maskEditNode.metadata.content} open={Boolean(maskEditNode)} onClose={() => setMaskEditNodeId(null)} onConfirm={(payload) => maskEditImageNode(maskEditNode!, payload)} /> : null}
 
                 {cropNode?.metadata?.content ? <CanvasNodeCropDialog dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={async (crop) => { await cropImageNode(cropNode!, crop); }} /> : null}
 
@@ -2808,6 +3009,17 @@ function InfiniteCanvasPage() {
                 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
 
                 {upscaleNode?.metadata?.content ? <CanvasNodeUpscaleDialog dataUrl={upscaleNode.metadata.content} open={Boolean(upscaleNode)} onClose={() => setUpscaleNodeId(null)} onConfirm={(params) => void upscaleImageNode(upscaleNode!, params)} /> : null}
+
+                {superResolveNode?.metadata?.content ? (
+                    <CanvasNodeSuperResolveDialog
+                        dataUrl={superResolveNode.metadata.content}
+                        config={effectiveConfig}
+                        open={Boolean(superResolveNode)}
+                        loading={superResolveLoading}
+                        onClose={() => setSuperResolveNodeId(null)}
+                        onConfirm={(params) => void superResolveImageNode(superResolveNode, params)}
+                    />
+                ) : null}
 
                 {previewNode?.metadata?.content ? (() => {
                     const group = getBatchGroupNodes(previewNode);
@@ -3327,6 +3539,30 @@ function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeDat
     const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const size = typeof patch?.size === "string" && node.type === CanvasNodeType.Image && !node.metadata?.content ? nodeSizeFromRatio(patch.size, spec.width, spec.height) : null;
     return size ? { ...next, ...size, position: { x: node.position.x + node.width / 2 - size.width / 2, y: node.position.y + node.height / 2 - size.height / 2 } } : next;
+}
+
+function layoutCanvasGroups(nodes: CanvasNodeData[]) {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const groups = new Map<string, string[]>();
+    nodes.forEach((node) => {
+        if (node.type !== CanvasNodeType.Group) return;
+        const childIds = (node.metadata?.groupChildIds || []).filter((id) => nodeById.get(id)?.type !== CanvasNodeType.Group);
+        if (childIds.length) groups.set(node.id, childIds);
+    });
+    return nodes.flatMap((node) => {
+        if (node.type === CanvasNodeType.Group) {
+            const childIds = groups.get(node.id);
+            if (!childIds?.length) return [];
+            const children = childIds.map((id) => nodeById.get(id)!).filter(Boolean);
+            const left = Math.min(...children.map((child) => child.position.x));
+            const top = Math.min(...children.map((child) => child.position.y));
+            const right = Math.max(...children.map((child) => child.position.x + child.width));
+            const bottom = Math.max(...children.map((child) => child.position.y + child.height));
+            return [{ ...node, position: { x: left - 36, y: top - 52 }, width: right - left + 72, height: bottom - top + 88, metadata: { ...node.metadata, groupChildIds: childIds } }];
+        }
+        if (node.metadata?.groupId && !groups.has(node.metadata.groupId)) return [{ ...node, metadata: { ...node.metadata, groupId: undefined } }];
+        return [node];
+    });
 }
 
 function normalizeConnection(firstNodeId: string, secondNodeId: string, nodes: CanvasNodeData[], firstHandleType: "source" | "target") {

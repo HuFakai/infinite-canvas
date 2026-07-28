@@ -26,6 +26,8 @@ export type ImageUpscaleParams = {
 export type ImageSplitParams = {
     rows: number;
     columns: number;
+    horizontalLines?: number[];
+    verticalLines?: number[];
 };
 
 export type ImageSplitPiece = {
@@ -33,6 +35,17 @@ export type ImageSplitPiece = {
     column: number;
     dataUrl: string;
 };
+
+export type MaskWorkingImage = {
+    dataUrl: string;
+    width: number;
+    height: number;
+    originalWidth: number;
+    originalHeight: number;
+};
+
+const MASK_WORKING_MAX_EDGE = 1920;
+const MASK_DIMENSION_MULTIPLE = 16;
 
 export async function cropDataUrl(dataUrl: string, crop?: ImageCropRect) {
     const image = await loadImage(dataUrl);
@@ -49,19 +62,41 @@ export async function splitDataUrl(dataUrl: string, params: ImageSplitParams): P
     const image = await loadImage(dataUrl);
     const rows = Math.max(1, Math.floor(params.rows));
     const columns = Math.max(1, Math.floor(params.columns));
+    const xCuts = buildSplitCuts(params.verticalLines, image.width, columns);
+    const yCuts = buildSplitCuts(params.horizontalLines, image.height, rows);
     const pieces: ImageSplitPiece[] = [];
 
-    for (let row = 0; row < rows; row += 1) {
-        const sy = Math.floor((row * image.height) / rows);
-        const sh = Math.floor(((row + 1) * image.height) / rows) - sy;
-        for (let column = 0; column < columns; column += 1) {
-            const sx = Math.floor((column * image.width) / columns);
-            const sw = Math.floor(((column + 1) * image.width) / columns) - sx;
+    for (let row = 0; row < yCuts.length - 1; row += 1) {
+        const sy = yCuts[row];
+        const sh = yCuts[row + 1] - sy;
+        for (let column = 0; column < xCuts.length - 1; column += 1) {
+            const sx = xCuts[column];
+            const sw = xCuts[column + 1] - sx;
             pieces.push({ row, column, dataUrl: drawCrop(image, sx, sy, sw, sh) });
         }
     }
 
     return pieces;
+}
+
+function buildSplitCuts(lines: number[] | undefined, size: number, count: number) {
+    if (!lines?.length) return Array.from({ length: count + 1 }, (_, index) => Math.floor((index * size) / count));
+    return [0, ...lines.map((line) => Math.round(line * size)).filter((line) => line > 0 && line < size).sort((a, b) => a - b), size];
+}
+
+export async function prepareMaskWorkingImage(dataUrl: string): Promise<MaskWorkingImage> {
+    const image = await loadImage(dataUrl);
+    const scale = Math.min(1, MASK_WORKING_MAX_EDGE / Math.max(image.width, image.height));
+    const width = alignMaskDimension(image.width * scale);
+    const height = alignMaskDimension(image.height * scale);
+    const canvas = drawResizeCanvas(image, image.width, image.height, width, height, "high");
+    return {
+        dataUrl: await canvasToDataUrl(canvas, "image/png"),
+        width,
+        height,
+        originalWidth: image.width,
+        originalHeight: image.height,
+    };
 }
 
 export async function transformAngleDataUrl(dataUrl: string, params: ImageAngleTransform) {
@@ -158,6 +193,25 @@ function drawResizeCanvas(source: CanvasImageSource, sourceWidth: number, source
     context.imageSmoothingQuality = algorithm === "bilinear" ? "medium" : "high";
     context.drawImage(source, 0, 0, sourceWidth, sourceHeight, 0, 0, width, height);
     return canvas;
+}
+
+function alignMaskDimension(value: number) {
+    return Math.max(MASK_DIMENSION_MULTIPLE, Math.floor(Math.max(MASK_DIMENSION_MULTIPLE, value) / MASK_DIMENSION_MULTIPLE) * MASK_DIMENSION_MULTIPLE);
+}
+
+function canvasToDataUrl(canvas: HTMLCanvasElement, mimeType: string) {
+    return new Promise<string>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+            if (!blob) {
+                reject(new Error("生成遮罩工作图失败"));
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(new Error("读取遮罩工作图失败"));
+            reader.readAsDataURL(blob);
+        }, mimeType);
+    });
 }
 
 function loadImage(dataUrl: string) {

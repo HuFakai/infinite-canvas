@@ -61,6 +61,8 @@ type ResponseApiOutputItem = Record<string, unknown> &
 
 type ImageApiResponse = {
     data?: Array<Record<string, unknown>>;
+    size?: string;
+    quality?: string;
     error?: { message?: string };
     code?: number;
     msg?: string;
@@ -96,7 +98,14 @@ type GeminiPayload = {
 type ResponseStreamState = { buffer: string; text: string; payload?: ResponsesApiResponse; error?: string };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
 
-type GeneratedImage = { id: string; dataUrl: string; seed?: number };
+export type GeneratedImage = {
+    id: string;
+    dataUrl: string;
+    seed?: number;
+    actualSize?: string;
+    actualQuality?: string;
+    revisedPrompt?: string;
+};
 
 type ParsedImageResponse = {
     images: GeneratedImage[];
@@ -250,17 +259,41 @@ function parseImagePayload(payload: ImageApiResponse, mime: string): GeneratedIm
     if (payload.msg && !payload.data?.length) {
         throw new ImageRequestError(payload.msg, payload);
     }
-    const images =
-        payload.data
-            ?.map((item) => resolveImageDataUrl(item, mime))
-            .filter((value): value is string => Boolean(value))
-            .map((dataUrl) => ({ id: nanoid(), dataUrl })) || [];
+    const record = payload as ImageApiResponse & Record<string, unknown>;
+    const imageItems = [
+        ...(payload.data || []),
+        ...collectImageRecords(record.images),
+        ...collectImageRecords(record.results),
+        ...collectImageRecords(record.output),
+    ];
+    const seen = new Set<string>();
+    const images = imageItems.flatMap((item) => {
+        const dataUrl = resolveImageDataUrl(item, mime);
+        if (!dataUrl || seen.has(dataUrl)) return [];
+        seen.add(dataUrl);
+        return [{
+            id: nanoid(),
+            dataUrl,
+            actualSize: getOptionalString(item, "size") || payload.size,
+            actualQuality: getOptionalString(item, "quality") || payload.quality,
+            revisedPrompt: getOptionalString(item, "revised_prompt") || getOptionalString(item, "revisedPrompt"),
+        }];
+    });
 
     if (images.length === 0) {
         throw new ImageRequestError("接口没有返回图片", payload);
     }
 
     return images;
+}
+
+function collectImageRecords(value: unknown, depth = 0): Array<Record<string, unknown>> {
+    if (value == null || depth > 4) return [];
+    if (typeof value === "string") return [{ url: value }];
+    if (Array.isArray(value)) return value.flatMap((item) => collectImageRecords(item, depth + 1));
+    if (!isRecord(value)) return [];
+    if (resolveImageDataUrl(value, "image/png")) return [value];
+    return ["data", "images", "results", "output", "result"].flatMap((key) => collectImageRecords(value[key], depth + 1));
 }
 
 function parseJsonPayload<T>(text: string): T | null {
@@ -307,6 +340,11 @@ function getStringRecordValue(record: Record<string, unknown>, key: string) {
     return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
+function getOptionalString(record: Record<string, unknown>, key: string) {
+    const value = record[key];
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 function collectResponsesImageStrings(value: unknown, depth = 0): string[] {
     if (depth > 5 || value == null) return [];
     if (typeof value === "string") return value.trim() ? [value.trim()] : [];
@@ -341,9 +379,17 @@ function parseResponsesPayload(payload: ResponsesApiResponse, mime: string): Gen
     const images =
         payload.output
             ?.filter((item) => item.type === "image_generation_call")
-            .flatMap((item) => collectResponsesImageSources(item))
-            .filter(Boolean)
-            .map((source) => ({ id: nanoid(), dataUrl: normalizeImageSource(source, mime) })) || [];
+            .flatMap((item) =>
+                collectResponsesImageSources(item)
+                    .filter(Boolean)
+                    .map((source) => ({
+                        id: nanoid(),
+                        dataUrl: normalizeImageSource(source, mime),
+                        actualSize: getOptionalString(item, "size"),
+                        actualQuality: getOptionalString(item, "quality"),
+                        revisedPrompt: getOptionalString(item, "revised_prompt") || getOptionalString(item, "revisedPrompt"),
+                    })),
+            ) || [];
 
     if (images.length === 0) {
         throw new ImageRequestError("Responses API 没有返回图片", payload);
@@ -684,9 +730,10 @@ function aiHeaders(config: AiConfig, contentType?: string) {
           };
 }
 
-function activeLocalProtocol(config: AiConfig) {
-    if (config.channelMode !== "local") return "openai";
-    return localChannelForActiveModel(config)?.protocol === "gemini" ? "gemini" : "openai";
+function activeProtocol(config: AiConfig) {
+    if (config.channelMode === "local") return localChannelForActiveModel(config)?.protocol || "openai";
+    const channelId = channelIdForActiveModel(config);
+    return config.publicChannels.find((channel) => channel.id === channelId)?.protocol || config.publicChannels.find((channel) => channel.models.includes(config.model))?.protocol || "openai";
 }
 
 function geminiConfig(config: AiConfig): AiConfig {
@@ -1274,6 +1321,46 @@ async function requestImageEditSingle(config: AiConfig, prompt: string, referenc
     );
 }
 
+async function requestArkImageEdit(config: AiConfig, prompt: string, references: ReferenceImage[], params: ImageRequestParams, options: RequestOptions = {}): Promise<GeneratedImage[]> {
+    const mime = MIME_MAP[params.outputFormat];
+    const body: Record<string, unknown> = {
+        model: config.model,
+        prompt: withPromptGuard(config, withSystemPrompt(config, prompt)),
+        image: await Promise.all(references.map((image) => imageToDataUrl(image))),
+        response_format: config.responseFormatB64Json ? "b64_json" : "url",
+        output_format: params.outputFormat,
+    };
+    if (params.n > 1) body.n = params.n;
+    if (params.size) body.size = params.size;
+    if (params.quality && params.quality !== "auto") body.quality = params.quality;
+
+    return requestAndParseImages(
+        config,
+        "/images/generations",
+        { ...body, image: references.map((image) => ({ id: image.id, name: image.name, type: image.type })) },
+        params.timeoutSeconds,
+        () =>
+            requestWithTransientRetry(() =>
+                withTimeout(
+                    params.timeoutSeconds,
+                    (signal) =>
+                        fetch(aiApiUrl(config, "/images/generations"), {
+                            method: "POST",
+                            headers: aiHeaders(config, "application/json"),
+                            body: JSON.stringify(body),
+                            signal,
+                        }),
+                    options.signal,
+                ),
+            ),
+        async (response) => {
+            const text = await response.text();
+            const images = parseImageTextPayload(text, mime);
+            return { images, responseBody: stringifyLogPayload(parseJsonPayload(text) || summarizeGeneratedImages(images, "ark-image-edit")) };
+        },
+    );
+}
+
 function createResponsesImageTool(config: AiConfig, params: ImageRequestParams, isEdit: boolean) {
     const tool: Record<string, unknown> = {
         type: "image_generation",
@@ -1377,9 +1464,14 @@ async function requestAndParseImages(config: AiConfig, endpoint: string, request
 
 async function requestImages(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], options: { maskDataUrl?: string; signal?: AbortSignal } = {}): Promise<GeneratedImage[]> {
     const params = createImageRequestParams(config);
-    if (activeLocalProtocol(config) === "gemini") {
+    const protocol = activeProtocol(config);
+    if (protocol === "gemini" && config.channelMode === "local") {
         if (options.maskDataUrl) throw new ImageRequestError("Gemini 调用格式暂不支持蒙版编辑");
         return requestGeminiImages(geminiConfig(config), prompt, references, params.n, options);
+    }
+    if (protocol === "ark" && references.length) {
+        if (options.maskDataUrl) throw new ImageRequestError("火山方舟调用格式暂不支持蒙版编辑");
+        return requestArkImageEdit(config, prompt, references, params, options);
     }
     const useConcurrentSingleRequests = config.apiMode === "responses" || config.codexCli || config.streamImages;
     if (params.n > 1 && useConcurrentSingleRequests) {

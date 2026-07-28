@@ -79,8 +79,6 @@ func New() *gin.Engine {
 	api.GET("/assets", middleware.OptionalAuth, gin.WrapF(handler.Assets))
 	api.POST("/admin/login", gin.WrapF(handler.AdminLogin))
 
-	api.GET("/leaderboard/images", gin.WrapF(handler.ImageGenerationLeaderboard))
-
 	api.GET("/payments/zpay/notify", gin.WrapF(handler.ZPayNotify))
 	api.POST("/payments/zpay/notify", gin.WrapF(handler.ZPayNotify))
 	api.GET("/payments/zpay/return", gin.WrapF(handler.ZPayReturn))

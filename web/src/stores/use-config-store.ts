@@ -9,7 +9,7 @@ import type { AdminPublicSettings } from "@/services/api/admin";
 
 export type LocalModelChannel = {
     id: string;
-    protocol: "openai" | "gemini";
+    protocol: "openai" | "gemini" | "ark";
     name: string;
     baseUrl: string;
     apiKey: string;
@@ -58,6 +58,7 @@ export type AiConfig = {
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 export const OPENAI_BASE_URL = "https://api.openai.com";
 export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+export const ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3";
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -139,9 +140,9 @@ export function normalizeLocalChannels(config: Partial<AiConfig>) {
     const channels = Array.isArray(config.localChannels) ? config.localChannels : [];
     const normalized = channels.map((channel, index) => ({
         id: channel.id || `local-${index + 1}`,
-        protocol: channel.protocol === "gemini" ? "gemini" as const : "openai" as const,
+        protocol: channel.protocol === "gemini" || channel.protocol === "ark" ? channel.protocol : "openai" as const,
         name: typeof channel.name === "string" ? channel.name : `本地渠道 ${index + 1}`,
-        baseUrl: channel.baseUrl || (channel.protocol === "gemini" ? GEMINI_BASE_URL : ""),
+        baseUrl: channel.baseUrl || defaultBaseUrlForProtocol(channel.protocol),
         apiKey: channel.apiKey || "",
         models: Array.isArray(channel.models) ? channel.models.filter(Boolean) : [],
     }));
@@ -251,36 +252,17 @@ export function useSiteInfo() {
 }
 
 export function buildApiUrl(baseUrl: string, path: string) {
-    const normalizedBaseUrl = normalizeArkPlanBaseUrl(baseUrl.trim().replace(/\/+$/, ""));
+    const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
     const lowerBaseUrl = normalizedBaseUrl.toLowerCase();
     const hasApiVersion = lowerBaseUrl.endsWith("/v1") || lowerBaseUrl.endsWith("/api/v3") || lowerBaseUrl.endsWith("/api/plan/v3");
     const apiBaseUrl = hasApiVersion ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`;
     return `${apiBaseUrl}${path}`;
 }
 
-export function defaultBaseUrlForProtocol(protocol: "openai" | "gemini") {
-    return protocol === "gemini" ? GEMINI_BASE_URL : OPENAI_BASE_URL;
-}
-
-function normalizeArkPlanBaseUrl(baseUrl: string) {
-    try {
-        const url = new URL(baseUrl);
-        const path = url.pathname.replace(/\/+$/, "");
-        const lowerPath = path.toLowerCase();
-        const arkPlanIndex = lowerPath.indexOf("/api/plan/v3");
-        if (arkPlanIndex >= 0) {
-            url.pathname = path.slice(0, arkPlanIndex + "/api/plan/v3".length);
-            url.search = "";
-            url.hash = "";
-            return url.toString().replace(/\/+$/, "");
-        }
-    } catch {
-        // Keep string fallback below.
-    }
-    const marker = "ark.cn-beijing.volces.com/api/v3";
-    const lower = baseUrl.toLowerCase();
-    if (!lower.includes(marker)) return baseUrl;
-    return baseUrl.replace(/\/api\/v3.*$/i, "/api/plan/v3");
+export function defaultBaseUrlForProtocol(protocol: LocalModelChannel["protocol"]) {
+    if (protocol === "gemini") return GEMINI_BASE_URL;
+    if (protocol === "ark") return ARK_BASE_URL;
+    return OPENAI_BASE_URL;
 }
 
 export function channelIdForActiveModel(config: AiConfig) {

@@ -1,0 +1,8 @@
+data: {"type":"response.image_generation_call.partial_image","partial_image_b64":"__IMAGE_BASE64__"}
+
+data: {"type":"response.image_generation_call.completed","result":"__IMAGE_BASE64__"}
+
+data: {"type":"response.completed","response":{"output":[{"type":"image_generation_call","result":"__IMAGE_BASE64__"}]}}
+
+data: [DONE]
+

@@ -1,0 +1,6 @@
+data: {"object":"image.generation.partial","partial_image_b64":"__IMAGE_BASE64__"}
+
+data: {"object":"image.generation.result","data":[{"b64_json":"__IMAGE_BASE64__"}]}
+
+data: [DONE]
+

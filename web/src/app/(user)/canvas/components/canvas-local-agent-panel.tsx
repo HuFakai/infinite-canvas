@@ -149,7 +149,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
         return () => {
             source.close();
             connectedRef.current = false;
-            setAgentState({ connected: false });
+            setAgentState({ connected: false, waiting: false, sending: false });
         };
     }, [enabled, endpoint, loadThreads, message, setAgentState, token]);
 

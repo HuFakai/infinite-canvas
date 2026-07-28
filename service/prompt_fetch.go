@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -63,7 +64,110 @@ func SyncPromptCategory(category string) ([]model.PromptCategory, error) {
 		}
 		return repository.ListPromptCategories()
 	}
+	for _, source := range promptJSONSources() {
+		if source.ID != category {
+			continue
+		}
+		items, err := buildJSONSourcePrompts(source)
+		if err != nil {
+			return nil, err
+		}
+		promptCategory := model.PromptCategory{Category: source.ID, Name: firstNonEmpty(source.Name, source.ID), Description: "标准 JSON 提示词来源", GithubURL: source.URL, Remote: true}
+		if err := repository.ReplacePromptCategory(promptCategory, items); err != nil {
+			return nil, err
+		}
+		return ListPromptCategories(), nil
+	}
 	return nil, errors.New("未知提示词分类")
+}
+
+func promptJSONSources() []model.PromptJSONSource {
+	settings, err := repository.GetSettings()
+	if err != nil {
+		return nil
+	}
+	result := []model.PromptJSONSource{}
+	for _, source := range normalizePromptSyncSetting(settings.Private.PromptSync).Sources {
+		source.ID = strings.TrimSpace(source.ID)
+		source.URL = strings.TrimSpace(source.URL)
+		if source.Enabled && source.ID != "" && source.URL != "" {
+			result = append(result, source)
+		}
+	}
+	return result
+}
+
+func buildJSONSourcePrompts(source model.PromptJSONSource) ([]model.Prompt, error) {
+	request, err := http.NewRequest(http.MethodGet, source.URL, nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := (&http.Client{Timeout: 30 * time.Second}).Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, errors.New("JSON 提示词来源拉取失败")
+	}
+	var payload any
+	if json.NewDecoder(response.Body).Decode(&payload) != nil {
+		return nil, errors.New("JSON 提示词来源格式无效")
+	}
+	if record, ok := payload.(map[string]any); ok {
+		payload = record["items"]
+	}
+	values, ok := payload.([]any)
+	if !ok {
+		return nil, errors.New("JSON 提示词来源必须是数组或 items 数组")
+	}
+	items := []model.Prompt{}
+	for index, value := range values {
+		record, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		title := strings.TrimSpace(fmt.Sprint(record["title"]))
+		prompt := strings.TrimSpace(fmt.Sprint(record["prompt"]))
+		if title == "" || prompt == "" {
+			continue
+		}
+		id := strings.TrimSpace(fmt.Sprint(record["id"]))
+		if id == "" || id == "<nil>" {
+			id = leftPad(index + 1)
+		}
+		items = append(items, model.Prompt{
+			ID:       source.ID + "-" + id,
+			Title:    title,
+			Prompt:   prompt,
+			CoverURL: optionalJSONText(record["coverUrl"]),
+			Preview:  optionalJSONText(record["preview"]),
+			Tags:     stringList(record["tags"]),
+		})
+	}
+	return items, nil
+}
+
+func optionalJSONText(record map[string]any, key string) string {
+	value, ok := record[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+func stringList(value any) []string {
+	values, ok := value.([]any)
+	if !ok {
+		return []string{}
+	}
+	result := []string{}
+	for _, item := range values {
+		if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+			result = append(result, strings.TrimSpace(text))
+		}
+	}
+	return result
 }
 
 func buildPromptCategory(category string) ([]model.Prompt, error) {

@@ -1,8 +1,9 @@
 "use client";
 
 import { App, Button, Form, Input, Modal, Segmented, Select, Switch, Tabs, Checkbox, Space, Typography } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ReloadOutlined } from "@ant-design/icons";
+import { Download, Upload } from "lucide-react";
 
 import { ModelPicker } from "@/components/model-picker";
 import { fetchChannelModels, type AdminModelChannel } from "@/services/api/admin";
@@ -10,6 +11,7 @@ import { fetchUserConfig, measureUserStorageProvider, syncUserModelConfig, syncU
 import { defaultUserStorageProvider, saveUserStorageProvider, USER_STORAGE_PROVIDER_KEY, type UserStorageProvider, clearStorageConfigCache as clearImageStorageCache } from "@/services/image-storage";
 import { defaultBaseUrlForProtocol, normalizeLocalChannels, useConfigStore, useEffectiveConfig, type AiConfig, type LocalModelChannel } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { applyAppConfigFile, exportSafeAppConfig, readAppConfigFile, type AppConfigPreview } from "@/services/config-file";
 
 export function AppConfigModal() {
     const { message, modal } = App.useApp();
@@ -37,6 +39,8 @@ export function AppConfigModal() {
     const [saving, setSaving] = useState(false);
     const [migrating, setMigrating] = useState(false);
     const [migrationProgress, setMigrationProgress] = useState({ current: 0, total: 0 });
+    const configInputRef = useRef<HTMLInputElement>(null);
+    const [configPreview, setConfigPreview] = useState<AppConfigPreview | null>(null);
 
     const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
     const [selectingChannelId, setSelectingChannelId] = useState("");
@@ -450,6 +454,25 @@ export function AppConfigModal() {
         closeChannelModelSelector();
     };
 
+    const loadConfigFile = async (file: File) => {
+        try {
+            setConfigPreview(await readAppConfigFile(file));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "配置文件读取失败");
+        } finally {
+            if (configInputRef.current) configInputRef.current.value = "";
+        }
+    };
+
+    const confirmConfigImport = () => {
+        if (!configPreview) return;
+        const nextStorage = applyAppConfigFile(configPreview.file, config, userStorage);
+        setUserStorage(nextStorage);
+        saveUserStorageProvider(nextStorage);
+        setConfigPreview(null);
+        message.success("配置已导入；本机密钥保持不变，请确认后再保存");
+    };
+
     return (
         <>
             <Modal
@@ -470,6 +493,18 @@ export function AppConfigModal() {
             }
         >
             <div className="pt-1">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200 px-3 py-2 dark:border-stone-800">
+                    <div className="text-xs text-stone-500">配置文件默认不包含 API Key、S3/R2 密钥或后台渠道快照。</div>
+                    <div className="flex gap-2">
+                        <Button size="small" icon={<Upload className="size-4" />} onClick={() => configInputRef.current?.click()}>
+                            导入
+                        </Button>
+                        <Button size="small" icon={<Download className="size-4" />} onClick={() => exportSafeAppConfig(config, userStorage)}>
+                            安全导出
+                        </Button>
+                        <input ref={configInputRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => event.target.files?.[0] && void loadConfigFile(event.target.files[0])} />
+                    </div>
+                </div>
                 <Form layout="vertical" requiredMark={false}>
                     {allowCustomChannel ? (
                         <Form.Item label="渠道模式" className="mb-4">
@@ -501,7 +536,15 @@ export function AppConfigModal() {
                                     <div key={channel.id} className="space-y-2 rounded-md bg-stone-50 p-2 dark:bg-stone-900">
                                         <div className="grid gap-2 md:grid-cols-[120px_140px_minmax(0,1fr)_minmax(0,1fr)_auto]">
                                             <Input value={channel.name} placeholder="渠道名称" onChange={(event) => patchLocalChannel(channel.id, { name: event.target.value })} />
-                                            <Select value={channel.protocol || "openai"} options={[{ label: "OpenAI", value: "openai" }, { label: "Gemini", value: "gemini" }]} onChange={(value) => patchLocalChannelProtocol(channel, value)} />
+                                            <Select
+                                                value={channel.protocol || "openai"}
+                                                options={[
+                                                    { label: "OpenAI", value: "openai" },
+                                                    { label: "Gemini", value: "gemini" },
+                                                    { label: "火山方舟", value: "ark" },
+                                                ]}
+                                                onChange={(value) => patchLocalChannelProtocol(channel, value)}
+                                            />
                                             <Input value={channel.baseUrl} placeholder="Base URL" onChange={(event) => patchLocalChannel(channel.id, { baseUrl: event.target.value })} />
                                             <Input.Password value={channel.apiKey} placeholder="API Key" onChange={(event) => patchLocalChannel(channel.id, { apiKey: event.target.value })} />
                                             <div className="flex gap-2">
@@ -631,6 +674,29 @@ export function AppConfigModal() {
             </div>
         </Modal>
         <Modal
+            title="确认导入配置"
+            open={Boolean(configPreview)}
+            onCancel={() => setConfigPreview(null)}
+            onOk={confirmConfigImport}
+            okText="导入"
+            cancelText="取消"
+            destroyOnHidden
+        >
+            {configPreview ? (
+                <div className="space-y-3 text-sm">
+                    <div className="grid grid-cols-2 gap-3">
+                        <PreviewItem label="渠道" value={`${configPreview.channelCount} 个`} />
+                        <PreviewItem label="模型" value={`${configPreview.modelCount} 个`} />
+                        <PreviewItem label="默认生图模型" value={configPreview.imageModel || "未设置"} />
+                        <PreviewItem label="默认文本模型" value={configPreview.textModel || "未设置"} />
+                    </div>
+                    <div className="rounded-md bg-stone-100 px-3 py-2 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">
+                        {configPreview.includesStorage ? "包含不带密钥的对象存储地址信息。" : "不包含对象存储信息。"} 导入不会覆盖当前设备保存的 API Key 和访问密钥，也不会自动开启账号同步。
+                    </div>
+                </div>
+            ) : null}
+        </Modal>
+        <Modal
             title={
                 <Space size={12}>
                     <span className="text-lg font-semibold">选择渠道模型</span>
@@ -749,6 +815,15 @@ export function AppConfigModal() {
         </Modal>
     </>
 );
+}
+
+function PreviewItem({ label, value }: { label: string; value: string }) {
+    return (
+        <div className="min-w-0 rounded-md border border-stone-200 px-3 py-2 dark:border-stone-800">
+            <div className="text-xs text-stone-500">{label}</div>
+            <div className="mt-1 truncate font-medium">{value}</div>
+        </div>
+    );
 }
 
 function FeatureSwitch({ title, description, checked, onChange }: { title: string; description: string; checked: boolean; onChange: (checked: boolean) => void }) {

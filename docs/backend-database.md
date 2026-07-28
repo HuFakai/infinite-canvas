@@ -119,7 +119,7 @@ description: 当前后端主要数据表与字段说明
 | --- | --- | --- |
 | `availableModels` | string[] | 系统可用模型列表 |
 | `modelCosts` | object[] | 模型算力点配置 |
-| `channels` | object[] | 前端可见的渠道摘要，包含 `protocol: openai \| gemini` |
+| `channels` | object[] | 前端可见的渠道摘要，包含 `protocol: openai \| gemini \| ark` |
 | `defaultModel` | string | 默认模型 |
 | `defaultImageModel` | string | 默认图片模型 |
 | `defaultTextModel` | string | 默认文本模型 |
@@ -131,8 +131,8 @@ description: 当前后端主要数据表与字段说明
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `channels` | object[] | 后端模型渠道列表和密钥，单个渠道包含 `protocol: openai \| gemini` |
-| `promptSync` | object | GitHub 远程提示词定时同步配置 |
+| `channels` | object[] | 后端模型渠道列表和密钥；支持 `protocol: openai \| gemini \| ark` 及可选声明式异步生图 `imageAdapter` |
+| `promptSync` | object | 内置 GitHub 来源及管理员标准 JSON 来源的定时同步配置 |
 | `aiLog` | object | AI 日志上报和自动清理配置 |
 | `auth` | object | Linux.do 和 OIDC 私有密钥配置 |
 | `storage` | object | 后台 S3/R2 对象存储配置 |
@@ -234,10 +234,6 @@ description: 当前后端主要数据表与字段说明
 | `expires_at` | string | 订单过期时间 |
 | `created_at` | string | 创建时间 |
 | `updated_at` | string | 更新时间 |
-
-## 生图排行榜
-
-生图排行榜当前由接口查询统计结果返回，不单独创建迁移表。返回结构包含用户 ID、用户名、昵称、头像和生图次数。
 
 ## AI 调用日志
 

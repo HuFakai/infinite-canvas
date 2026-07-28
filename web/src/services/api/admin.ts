@@ -194,7 +194,7 @@ export async function deleteAdminAsset(token: string, id: string) {
 
 export type AdminModelChannel = {
     id: string;
-    protocol: "openai" | "gemini";
+    protocol: "openai" | "gemini" | "ark";
     name: string;
     baseUrl: string;
     apiKey: string;
@@ -203,6 +203,19 @@ export type AdminModelChannel = {
     timeout: number;
     enabled: boolean;
     remark: string;
+    imageAdapter?: {
+        enabled: boolean;
+        createPath: string;
+        taskIdPath: string;
+        statusPath: string;
+        statusField: string;
+        successValues: string[];
+        failureValues: string[];
+        resultPaths: string[];
+        errorPaths: string[];
+        pollInterval: number;
+        maxAttempts: number;
+    };
 };
 
 export type AdminPublicModelChannelSettings = {
@@ -224,7 +237,7 @@ export type AdminPublicModelChannelSettings = {
 
 export type AdminPublicModelChannelInfo = {
     id: string;
-    protocol: "openai" | "gemini";
+    protocol: "openai" | "gemini" | "ark";
     name: string;
     baseUrl: string;
     models: string[];
@@ -295,6 +308,7 @@ export type AdminPrivateSettings = {
     promptSync: {
         enabled: boolean;
         cron: string;
+        sources: Array<{ id: string; name: string; url: string; enabled: boolean }>;
     };
     aiLog: {
         localDirectReportEnabled: boolean;

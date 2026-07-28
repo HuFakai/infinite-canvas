@@ -60,6 +60,18 @@ func SyncRemotePromptCategories() {
 		}
 		log.Printf("scheduled prompt sync done category=%s", category.Category)
 	}
+	settings, err := repository.GetSettings()
+	if err != nil {
+		return
+	}
+	for _, source := range normalizePromptSyncSetting(settings.Private.PromptSync).Sources {
+		if !source.Enabled {
+			continue
+		}
+		if _, err := SyncPromptCategory(source.ID); err != nil {
+			log.Printf("scheduled prompt JSON sync failed source=%s err=%v", source.ID, err)
+		}
+	}
 }
 
 func normalizePromptSyncSetting(setting model.PromptSyncSetting) model.PromptSyncSetting {
@@ -69,6 +81,9 @@ func normalizePromptSyncSetting(setting model.PromptSyncSetting) model.PromptSyn
 	if setting.Enabled == nil {
 		enabled := true
 		setting.Enabled = &enabled
+	}
+	if setting.Sources == nil {
+		setting.Sources = []model.PromptJSONSource{}
 	}
 	return setting
 }

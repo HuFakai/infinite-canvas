@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Button, Input, Modal, Slider } from "antd";
+import { Button, Input, Modal, Slider, Spin } from "antd";
 import { Brush, Eraser, RotateCcw, WandSparkles, X } from "lucide-react";
 
-import { readImageMeta } from "@/lib/image-utils";
+import { CanvasImageEditorViewport } from "./canvas-image-editor-viewport";
+import { prepareMaskWorkingImage, type MaskWorkingImage } from "../utils/canvas-image-data";
 
 export type CanvasImageMaskEditPayload = {
     prompt: string;
     maskDataUrl: string;
+    sourceDataUrl: string;
 };
 
 type DrawMode = "paint" | "erase";
@@ -17,23 +19,46 @@ const defaultBrushSize = 100;
 const maskFillColor = "rgba(37, 99, 235, .38)";
 const maskBorderColor = "rgba(255, 255, 255, .72)";
 
-export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (payload: CanvasImageMaskEditPayload) => void }) {
+export function CanvasNodeMaskEditDialog({
+    dataUrl,
+    open,
+    onClose,
+    onConfirm,
+}: {
+    dataUrl: string;
+    open: boolean;
+    onClose: () => void;
+    onConfirm: (payload: CanvasImageMaskEditPayload) => Promise<void> | void;
+}) {
     const maskCanvasRef = useRef<HTMLCanvasElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);
     const drawingRef = useRef<{ active: boolean; last: { x: number; y: number } | null }>({ active: false, last: null });
-    const [image, setImage] = useState<{ width: number; height: number } | null>(null);
+    const [image, setImage] = useState<MaskWorkingImage | null>(null);
     const [prompt, setPrompt] = useState("");
     const [brushSize, setBrushSize] = useState(defaultBrushSize);
     const [mode, setMode] = useState<DrawMode>("paint");
     const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
 
     useEffect(() => {
         if (!open) return;
+        let canceled = false;
         setPrompt("");
         setBrushSize(defaultBrushSize);
         setMode("paint");
         setError("");
-        void readImageMeta(dataUrl).then(setImage);
+        setLoading(false);
+        setImage(null);
+        void prepareMaskWorkingImage(dataUrl)
+            .then((next) => {
+                if (!canceled) setImage(next);
+            })
+            .catch((reason) => {
+                if (!canceled) setError(reason instanceof Error ? reason.message : "读取图片失败");
+            });
+        return () => {
+            canceled = true;
+        };
     }, [dataUrl, open]);
 
     useEffect(() => {
@@ -91,43 +116,52 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
         setError("");
     };
 
-    const submit = () => {
+    const submit = async () => {
         const nextPrompt = prompt.trim();
         const canvas = maskCanvasRef.current;
         if (!nextPrompt) return setError("请输入修改要求");
-        if (!canvas) return;
+        if (!canvas || !image) return;
         if (!canvasHasPaint(canvas)) return setError("请先涂抹局部区域");
-        onConfirm({ prompt: nextPrompt, maskDataUrl: buildEditMask(canvas) });
+        setLoading(true);
+        try {
+            await onConfirm({ prompt: nextPrompt, maskDataUrl: buildEditMask(canvas), sourceDataUrl: image.dataUrl });
+        } catch (reason) {
+            setError(reason instanceof Error ? reason.message : "创建局部重绘配置失败");
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
-        <Modal title={null} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={980} centered destroyOnHidden>
+        <Modal title={null} open={open && Boolean(dataUrl)} onCancel={loading ? undefined : onClose} footer={null} width={1040} centered destroyOnHidden closable={!loading}>
             <div className="grid gap-5 lg:grid-cols-[minmax(360px,1fr)_320px]">
-                <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-black/10 bg-transparent p-0 dark:border-white/10">
-                    <div className="relative inline-block max-w-full overflow-hidden rounded-lg bg-transparent select-none">
-                        <img src={dataUrl} alt="" className="block max-h-[68vh] max-w-full bg-transparent" draggable={false} />
-                        {image ? (
-                            <>
-                                <canvas ref={maskCanvasRef} width={image.width} height={image.height} className="hidden" />
-                                <canvas
-                                    ref={previewCanvasRef}
-                                    width={image.width}
-                                    height={image.height}
-                                    className="absolute inset-0 h-full w-full cursor-crosshair touch-none"
-                                    onPointerDown={startDraw}
-                                    onPointerMove={moveDraw}
-                                    onPointerUp={stopDraw}
-                                    onPointerCancel={stopDraw}
-                                />
-                            </>
-                        ) : null}
+                {image ? (
+                    <CanvasImageEditorViewport image={image} className="h-[520px]">
+                        <img src={image.dataUrl} alt="" className="absolute inset-0 size-full bg-transparent object-fill" draggable={false} />
+                        <canvas ref={maskCanvasRef} width={image.width} height={image.height} className="hidden" />
+                        <canvas
+                            ref={previewCanvasRef}
+                            width={image.width}
+                            height={image.height}
+                            className="absolute inset-0 size-full cursor-crosshair touch-none"
+                            onPointerDown={startDraw}
+                            onPointerMove={moveDraw}
+                            onPointerUp={stopDraw}
+                            onPointerCancel={stopDraw}
+                        />
+                    </CanvasImageEditorViewport>
+                ) : (
+                    <div className="grid h-[520px] place-items-center rounded-lg border">
+                        {error ? <span className="text-sm text-[#ef4444]">工作图准备失败</span> : <Spin />}
                     </div>
-                </div>
+                )}
 
                 <div className="flex min-h-[360px] flex-col gap-5">
                     <div>
                         <h2 className="text-xl font-semibold">局部遮罩编辑</h2>
-                        <div className="mt-2 text-sm opacity-60">{image ? `${image.width} x ${image.height}px` : "读取中"}</div>
+                        <div className="mt-2 text-sm opacity-60">
+                            {image ? `${image.width} x ${image.height}px${image.width !== image.originalWidth || image.height !== image.originalHeight ? ` · 原图 ${image.originalWidth} x ${image.originalHeight}px` : ""}` : "正在准备工作图"}
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
@@ -163,14 +197,14 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
                     </div>
 
                     <div className="mt-auto flex items-center justify-between gap-2">
-                        <Button icon={<RotateCcw className="size-4" />} onClick={resetMask}>
+                        <Button disabled={loading || !image} icon={<RotateCcw className="size-4" />} onClick={resetMask}>
                             重置
                         </Button>
                         <div className="flex items-center gap-2">
-                            <Button icon={<X className="size-4" />} onClick={onClose}>
+                            <Button disabled={loading} icon={<X className="size-4" />} onClick={onClose}>
                                 取消
                             </Button>
-                            <Button type="primary" icon={<WandSparkles className="size-4" />} onClick={submit}>
+                            <Button type="primary" loading={loading} disabled={!image} icon={!loading && <WandSparkles className="size-4" />} onClick={() => void submit()}>
                                 AI 修改
                             </Button>
                         </div>

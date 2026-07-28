@@ -22,6 +22,9 @@ func ListPrompts(q model.Query) (model.PromptList, error) {
 
 func ListPromptCategories() []model.PromptCategory {
 	categories, _ := repository.ListPromptCategories()
+	for _, source := range promptJSONSources() {
+		categories = append(categories, model.PromptCategory{Category: source.ID, Name: firstNonEmpty(source.Name, source.ID), Description: "标准 JSON 提示词来源", GithubURL: source.URL, Remote: true})
+	}
 	return categories
 }
 
@@ -35,13 +38,25 @@ func SavePrompt(item model.Prompt) (model.Prompt, error) {
 		item.CreatedAt = now
 	}
 	item.UpdatedAt = now
-	category, ok := repository.PromptCategoryByCode(item.Category)
+	category, ok := promptCategoryByCode(item.Category)
 	if !ok {
 		category = repository.PromptCategories()[0]
 		item.Category = category.Category
 	}
 	item.GithubURL = ""
 	return repository.SavePrompt(item)
+}
+
+func promptCategoryByCode(code string) (model.PromptCategory, bool) {
+	if category, ok := repository.PromptCategoryByCode(code); ok {
+		return category, true
+	}
+	for _, category := range ListPromptCategories() {
+		if category.Category == code {
+			return category, true
+		}
+	}
+	return model.PromptCategory{}, false
 }
 
 func DeletePrompt(id string) error {

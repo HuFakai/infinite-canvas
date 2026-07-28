@@ -40,13 +40,14 @@ import {
     type WorkflowExternalTaskStart,
     type WorkflowExternalTaskSuccess,
 } from "@/components/workflows/creative-workflow-workspace";
-import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { localChannelForActiveModel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { ImageRequestError, requestEdit, requestGeneration } from "@/services/api/image";
 import { fetchUserConfig, syncUserImageHistory } from "@/services/api/user-config";
 import { deleteStoredImages, imageToBlob, imageToDataUrl, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { getImageThumbnail, warmImageThumbnails } from "@/services/image-thumbnail-cache";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
@@ -60,6 +61,9 @@ type GeneratedImage = {
     height: number;
     bytes: number;
     mimeType?: string;
+    actualSize?: string;
+    actualQuality?: string;
+    revisedPrompt?: string;
 };
 
 type GenerationResult = {
@@ -781,7 +785,18 @@ export default function ImagePage() {
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
-            const nextImage: GeneratedImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl), mimeType: meta.mimeType };
+            const nextImage: GeneratedImage = {
+                id: image.id,
+                dataUrl: image.dataUrl,
+                durationMs: performance.now() - itemStartedAt,
+                width: meta.width,
+                height: meta.height,
+                bytes: getDataUrlByteSize(image.dataUrl),
+                mimeType: meta.mimeType,
+                actualSize: image.actualSize || `${meta.width}x${meta.height}`,
+                actualQuality: image.actualQuality,
+                revisedPrompt: image.revisedPrompt,
+            };
             setResults((value) => updateResult(value, resultId, { status: "success", image: nextImage, durationMs: nextImage.durationMs }));
             return nextImage;
         } catch (error) {
@@ -1838,6 +1853,12 @@ function TaskInfo({ result, error, onCopyPrompt }: { result: GenerationResult; e
                     </Button>
                 </div>
             </div>
+            {result.image?.revisedPrompt && result.image.revisedPrompt !== result.prompt ? (
+                <div className="rounded-md border border-stone-200 bg-stone-50 p-2 dark:border-stone-800 dark:bg-stone-900">
+                    <div className="mb-1 font-medium text-stone-500">接口改写提示词</div>
+                    <div className="line-clamp-3 whitespace-pre-wrap text-stone-700 dark:text-stone-200">{result.image.revisedPrompt}</div>
+                </div>
+            ) : null}
             <div className="flex flex-wrap gap-1.5">
                 {result.workflowName ? (
                     <Tag className="m-0" color="cyan">
@@ -1848,10 +1869,11 @@ function TaskInfo({ result, error, onCopyPrompt }: { result: GenerationResult; e
                 {result.config.channelName ? <Tag className="m-0">渠道 {result.config.channelName}</Tag> : null}
                 <Tag className="m-0">{result.model}</Tag>
                 <Tag className="m-0">{result.config.apiMode === "responses" ? "Responses" : "Images"}</Tag>
-                <Tag className="m-0">{result.config.size || "auto"}</Tag>
-                <Tag className="m-0">{result.config.quality || "auto"}</Tag>
+                <Tag className="m-0">请求 {result.config.size || "auto"}</Tag>
+                <Tag className="m-0">请求质量 {result.config.quality || "auto"}</Tag>
                 <Tag className="m-0">{result.config.outputFormat || "png"}</Tag>
-                {result.image?.width && result.image?.height ? <Tag className="m-0">{`${result.image.width}x${result.image.height}`}</Tag> : null}
+                {result.image?.width && result.image?.height ? <Tag className="m-0">实际 {result.image.actualSize || `${result.image.width}x${result.image.height}`}</Tag> : null}
+                {result.image?.actualQuality ? <Tag className="m-0">实际质量 {result.image.actualQuality}</Tag> : null}
                 {result.image?.bytes ? <Tag className="m-0">{formatBytes(result.image.bytes)}</Tag> : null}
                 {(result.config.outputFormat || "png") !== "png" ? <Tag className="m-0">压缩 {result.config.outputCompression || "100"}</Tag> : null}
                 <Tag className="m-0">审核 {result.config.moderation || "auto"}</Tag>
@@ -1943,7 +1965,7 @@ function HistoryLogCard({
                     <Tag className="m-0 text-[10px]">{log.imageCount} 张</Tag>
                 </div>
                 {firstImage ? (
-                    <Image src={firstImage.dataUrl} alt={`历史结果 ${index + 1}`} className="aspect-[4/3] object-cover" />
+                    <HistoryThumbnail image={firstImage} alt={`历史结果 ${index + 1}`} preview />
                 ) : (
                     <div className="flex size-full flex-col items-center justify-center gap-2 p-5 text-center text-sm text-red-500">
                         <AlertCircle className="size-7" />
@@ -1953,7 +1975,7 @@ function HistoryLogCard({
                 {displayImages.length > 1 ? (
                     <div className="absolute bottom-1.5 left-1.5 right-1.5 flex gap-1 overflow-hidden">
                         {displayImages.slice(0, 4).map((image) => (
-                            <img key={image.id} src={image.dataUrl} alt="" className="size-8 shrink-0 rounded border border-white/80 object-cover shadow-sm dark:border-stone-900/80" />
+                            <HistoryThumbnail key={image.id} image={image} alt="" />
                         ))}
                     </div>
                 ) : null}
@@ -1961,6 +1983,12 @@ function HistoryLogCard({
             </div>
             <div className="space-y-2 border-t border-stone-200 p-2.5 text-xs dark:border-stone-800">
                 <div className={`${expanded ? "" : "line-clamp-2"} whitespace-pre-wrap text-stone-700 dark:text-stone-200`}>{log.prompt}</div>
+                {firstImage?.revisedPrompt && firstImage.revisedPrompt !== log.prompt ? (
+                    <div className="rounded-md border border-stone-200 bg-stone-50 p-2 dark:border-stone-800 dark:bg-stone-900">
+                        <div className="mb-1 font-medium text-stone-500">接口改写提示词</div>
+                        <div className={`${expanded ? "" : "line-clamp-2"} whitespace-pre-wrap text-stone-700 dark:text-stone-200`}>{firstImage.revisedPrompt}</div>
+                    </div>
+                ) : null}
                 <div className="flex items-center justify-end gap-1">
                     <Button size="small" type="text" icon={<Copy className="size-3.5" />} onClick={() => closeThen(() => void onCopyPrompt(log.prompt))}>
                         复制
@@ -1988,9 +2016,11 @@ function HistoryLogCard({
                     {log.config.channelName ? <Tag className="m-0 text-[10px]">渠道 {log.config.channelName}</Tag> : null}
                     <Tag className="m-0 text-[10px]">{log.model}</Tag>
                     <Tag className="m-0 text-[10px]">{log.config.apiMode === "responses" ? "Responses" : "Images"}</Tag>
-                    <Tag className="m-0 text-[10px]">{log.config.size || "auto"}</Tag>
-                    <Tag className="m-0 text-[10px]">{log.config.quality || "auto"}</Tag>
+                    <Tag className="m-0 text-[10px]">请求 {log.config.size || "auto"}</Tag>
+                    <Tag className="m-0 text-[10px]">请求质量 {log.config.quality || "auto"}</Tag>
                     <Tag className="m-0 text-[10px]">{log.config.outputFormat || "png"}</Tag>
+                    {firstImage?.width && firstImage.height ? <Tag className="m-0 text-[10px]">实际 {firstImage.actualSize || `${firstImage.width}x${firstImage.height}`}</Tag> : null}
+                    {firstImage?.actualQuality ? <Tag className="m-0 text-[10px]">实际质量 {firstImage.actualQuality}</Tag> : null}
                     {firstImage?.bytes ? <Tag className="m-0 text-[10px]">{formatBytes(firstImage.bytes)}</Tag> : null}
                     {displayImages.length > 1 && totalImageBytes ? <Tag className="m-0 text-[10px]">总计 {formatBytes(totalImageBytes)}</Tag> : null}
                     {(log.config.outputFormat || "png") !== "png" ? <Tag className="m-0 text-[10px]">压缩 {log.config.outputCompression || "100"}</Tag> : null}
@@ -2203,6 +2233,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         }),
     );
     const visibleImages = images.filter((image) => Boolean(image.dataUrl));
+    if (typeof window !== "undefined") warmImageThumbnails(visibleImages);
     const config = normalizeLogConfig(log);
     return {
         id: log.id || nanoid(),
@@ -2229,6 +2260,23 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         workflowName: log.workflowName,
         workflowInputs: log.workflowInputs,
     };
+}
+
+function HistoryThumbnail({ image, alt, preview = false }: { image: GeneratedImage; alt: string; preview?: boolean }) {
+    const [src, setSrc] = useState(image.dataUrl);
+    useEffect(() => {
+        let active = true;
+        void getImageThumbnail(image.storageKey || image.id, image.dataUrl)
+            .then((value) => {
+                if (active && value) setSrc(value);
+            })
+            .catch(() => {});
+        return () => {
+            active = false;
+        };
+    }, [image.dataUrl, image.id, image.storageKey]);
+    if (preview) return <Image src={src} preview={{ src: image.dataUrl }} alt={alt} className="aspect-[4/3] object-cover" />;
+    return <img src={src} alt={alt} className="size-8 shrink-0 rounded border border-white/80 object-cover shadow-sm dark:border-stone-900/80" />;
 }
 
 function serializeLog(log: GenerationLog): GenerationLog {
@@ -2283,8 +2331,8 @@ function buildGenerationLogConfig(config: AiConfig): GenerationLogConfig {
         timeout: config.timeout,
         retryAttempts: config.retryAttempts,
         seed: config.seed,
-        channelId: config.activeChannelId || config.imageChannelId,
-        channelName: resolveChannelName(config, config.activeChannelId || config.imageChannelId),
+        channelId: config.imageChannelId || config.activeChannelId,
+        channelName: resolveChannelName(config, config.imageChannelId || config.activeChannelId),
         streamImages: config.streamImages,
         streamPartialImages: config.streamPartialImages,
         responseFormatB64Json: config.responseFormatB64Json,
@@ -2332,9 +2380,15 @@ function displayConfigFromLogConfig(config: AiConfig, saved: GenerationLogConfig
 }
 
 function resolveChannelName(config: AiConfig, channelId?: string) {
+    if (config.channelMode === "local") {
+        return localChannelForActiveModel({
+            ...config,
+            model: config.imageModel || config.model,
+            activeChannelId: channelId || config.imageChannelId,
+        })?.name || "本地直连";
+    }
     if (!channelId) return "";
-    const channels = config.channelMode === "remote" ? config.publicChannels : config.localChannels;
-    return channels.find((channel) => channel.id === channelId)?.name || channelId;
+    return config.publicChannels.find((channel) => channel.id === channelId)?.name || channelId;
 }
 
 function imageExtension(value: string) {

@@ -11,16 +11,32 @@ const (
 
 // ModelChannel 模型渠道配置。
 type ModelChannel struct {
-	ID       string   `json:"id"`
-	Protocol string   `json:"protocol"`
-	Name     string   `json:"name"`
-	BaseURL  string   `json:"baseUrl"`
-	APIKey   string   `json:"apiKey"`
-	Models   []string `json:"models"`
-	Weight   int      `json:"weight"`
-	Timeout  int      `json:"timeout"`
-	Enabled  bool     `json:"enabled"`
-	Remark   string   `json:"remark"`
+	ID           string               `json:"id"`
+	Protocol     string               `json:"protocol"`
+	Name         string               `json:"name"`
+	BaseURL      string               `json:"baseUrl"`
+	APIKey       string               `json:"apiKey"`
+	Models       []string             `json:"models"`
+	Weight       int                  `json:"weight"`
+	Timeout      int                  `json:"timeout"`
+	Enabled      bool                 `json:"enabled"`
+	Remark       string               `json:"remark"`
+	ImageAdapter *ImageChannelAdapter `json:"imageAdapter,omitempty"`
+}
+
+// ImageChannelAdapter 用固定字段描述异步生图协议，不允许执行自定义脚本。
+type ImageChannelAdapter struct {
+	Enabled       bool     `json:"enabled"`
+	CreatePath    string   `json:"createPath"`
+	TaskIDPath    string   `json:"taskIdPath"`
+	StatusPath    string   `json:"statusPath"`
+	StatusField   string   `json:"statusField"`
+	SuccessValues []string `json:"successValues"`
+	FailureValues []string `json:"failureValues"`
+	ResultPaths   []string `json:"resultPaths"`
+	ErrorPaths    []string `json:"errorPaths"`
+	PollInterval  int      `json:"pollInterval"`
+	MaxAttempts   int      `json:"maxAttempts"`
 }
 
 // ModelCost 模型算力点配置。
@@ -164,8 +180,16 @@ type StorageCapacityCheckSetting struct {
 
 // PromptSyncSetting 提示词定时同步配置。
 type PromptSyncSetting struct {
-	Enabled *bool  `json:"enabled"`
-	Cron    string `json:"cron"`
+	Enabled *bool              `json:"enabled"`
+	Cron    string             `json:"cron"`
+	Sources []PromptJSONSource `json:"sources"`
+}
+
+type PromptJSONSource struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Enabled bool   `json:"enabled"`
 }
 
 type PrivateAuthSetting struct {

@@ -1,9 +1,10 @@
 import { saveAs } from "file-saver";
 
 import { createZip } from "@/lib/zip";
-import { getImageBlob } from "@/services/image-storage";
+import { getImageBlob, imageToBlob } from "@/services/image-storage";
 import type { CanvasExportAsset, CanvasExportFile } from "../export-types";
 import type { CanvasProject } from "../stores/use-canvas-store";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
 
 export async function exportCanvasProjects(projects: CanvasProject[], fileName = "无限画布") {
     const zipFiles: { name: string; data: BlobPart }[] = [];
@@ -25,6 +26,22 @@ export async function exportCanvasProjects(projects: CanvasProject[], fileName =
 
     const data: CanvasExportFile = { app: "infinite-canvas", version: 3, exportedAt: new Date().toISOString(), projects: exportedProjects };
     const zip = await createZip([{ name: "projects.json", data: JSON.stringify(data, null, 2) }, ...zipFiles]);
+    saveAs(zip, `${safeFileName(fileName)}.zip`);
+}
+
+export async function exportCanvasNodes(nodes: CanvasNodeData[], connections: CanvasConnection[], fileName = "画布选中内容") {
+    const files: { name: string; data: BlobPart }[] = [];
+    const exportedNodes = await Promise.all(
+        nodes.map(async (node, index) => {
+            if (node.type !== CanvasNodeType.Image || !node.metadata?.content) return node;
+            const blob = await imageToBlob({ dataUrl: node.metadata.content, storageKey: node.metadata.storageKey });
+            const path = `images/${String(index + 1).padStart(2, "0")}-${safeFileName(node.title || node.id)}.${fileExtension(blob.type, node.metadata.storageKey || "")}`;
+            files.push({ name: path, data: blob });
+            return { ...node, metadata: { ...node.metadata, content: path, storageKey: undefined } };
+        }),
+    );
+    const manifest = { app: "infinite-canvas", type: "selection", version: 1, exportedAt: new Date().toISOString(), nodes: exportedNodes, connections };
+    const zip = await createZip([{ name: "selection.json", data: JSON.stringify(manifest, null, 2) }, ...files]);
     saveAs(zip, `${safeFileName(fileName)}.zip`);
 }
 

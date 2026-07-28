@@ -44,7 +44,7 @@ const emptySettings: AdminSettings = {
     },
     private: {
         channels: [],
-        promptSync: { enabled: true, cron: "*/5 * * * *" },
+        promptSync: { enabled: true, cron: "*/5 * * * *", sources: [] },
         aiLog: { localDirectReportEnabled: false, cleanup: { enabled: false, retentionDays: 14, cron: "0 3 * * *" } },
         auth: {
             linuxDo: { clientId: "", clientSecret: "" },
@@ -58,7 +58,31 @@ const emptySettings: AdminSettings = {
         },
     },
 };
-const emptyChannel: AdminModelChannel = { id: "", protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, timeout: 600, enabled: true, remark: "" };
+const emptyChannel: AdminModelChannel = {
+    id: "",
+    protocol: "openai",
+    name: "",
+    baseUrl: "",
+    apiKey: "",
+    models: [],
+    weight: 1,
+    timeout: 600,
+    enabled: true,
+    remark: "",
+    imageAdapter: {
+        enabled: false,
+        createPath: "/images/generations",
+        taskIdPath: "id",
+        statusPath: "/tasks/{task_id}",
+        statusField: "status",
+        successValues: ["succeeded", "completed", "success"],
+        failureValues: ["failed", "error", "canceled"],
+        resultPaths: ["data", "images", "results", "output"],
+        errorPaths: ["error.message", "message", "msg"],
+        pollInterval: 2000,
+        maxAttempts: 300,
+    },
+};
 const emptyStorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "images", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
 
 type SettingsTabKey = "public" | "private";
@@ -688,6 +712,23 @@ export default function AdminSettingsPage() {
                                             </Form.Item>
                                         </Col>
                                     </Row>
+                                    <Form.List name={["private", "promptSync", "sources"]}>
+                                        {(fields, { add, remove }) => (
+                                            <div className="space-y-2">
+                                                {fields.map((field) => (
+                                                    <Row key={field.key} gutter={8} align="middle">
+                                                        <Col xs={24} md={5}><Form.Item name={[field.name, "id"]} className="!mb-0" rules={[{ required: true }]}><Input placeholder="来源 ID" /></Form.Item></Col>
+                                                        <Col xs={24} md={5}><Form.Item name={[field.name, "name"]} className="!mb-0"><Input placeholder="显示名称" /></Form.Item></Col>
+                                                        <Col xs={24} md={11}><Form.Item name={[field.name, "url"]} className="!mb-0" rules={[{ required: true, type: "url" }]}><Input placeholder="标准 JSON URL" /></Form.Item></Col>
+                                                        <Col xs={18} md={2}><Form.Item name={[field.name, "enabled"]} className="!mb-0" valuePropName="checked"><Switch /></Form.Item></Col>
+                                                        <Col xs={6} md={1}><Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} /></Col>
+                                                    </Row>
+                                                ))}
+                                                <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ id: "", name: "", url: "", enabled: true })}>增加标准 JSON 来源</Button>
+                                                <Typography.Text type="secondary">JSON 支持数组或 items 数组，字段为 id、title、prompt、coverUrl、tags。</Typography.Text>
+                                            </div>
+                                        )}
+                                    </Form.List>
                                 </Card>
                                 <Card size="small" title="AI 调用日志">
                                     <Row gutter={16}>
@@ -1090,7 +1131,13 @@ export default function AdminSettingsPage() {
                             </Col>
                             <Col span={12}>
                                 <Form.Item name="protocol" label="协议">
-                                    <Select options={[{ label: "OpenAI", value: "openai" }, { label: "Gemini", value: "gemini" }]} />
+                                    <Select
+                                        options={[
+                                            { label: "OpenAI", value: "openai" },
+                                            { label: "Gemini", value: "gemini" },
+                                            { label: "火山方舟", value: "ark" },
+                                        ]}
+                                    />
                                 </Form.Item>
                             </Col>
                             <Col span={12}>
@@ -1131,6 +1178,61 @@ export default function AdminSettingsPage() {
                             <Col span={24}>
                                 <Form.Item name="remark" label="备注">
                                     <Input.TextArea rows={3} />
+                                </Form.Item>
+                            </Col>
+                            <Col span={24}>
+                                <Form.Item name={["imageAdapter", "enabled"]} label="声明式异步生图适配" valuePropName="checked" extra="仅配置固定路径和状态字段，不执行 JavaScript。关闭时使用标准 OpenAI 同步响应。">
+                                    <Switch />
+                                </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                                <Form.Item name={["imageAdapter", "createPath"]} label="创建任务路径">
+                                    <Input placeholder="/images/generations" />
+                                </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                                <Form.Item name={["imageAdapter", "taskIdPath"]} label="任务 ID 字段">
+                                    <Input placeholder="data.id" />
+                                </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                                <Form.Item name={["imageAdapter", "statusPath"]} label="查询路径">
+                                    <Input placeholder="/tasks/{task_id}" />
+                                </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                                <Form.Item name={["imageAdapter", "statusField"]} label="状态字段">
+                                    <Input placeholder="data.status" />
+                                </Form.Item>
+                            </Col>
+                            <Col span={24}>
+                                <Form.Item name={["imageAdapter", "resultPaths"]} label="图片结果字段">
+                                    <Select mode="tags" tokenSeparators={[",", "\n"]} placeholder="data.images, output.url" />
+                                </Form.Item>
+                            </Col>
+                            <Col span={24}>
+                                <Form.Item name={["imageAdapter", "errorPaths"]} label="错误字段">
+                                    <Select mode="tags" tokenSeparators={[",", "\n"]} placeholder="error.message, message" />
+                                </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                                <Form.Item name={["imageAdapter", "successValues"]} label="成功状态">
+                                    <Select mode="tags" tokenSeparators={[",", "\n"]} />
+                                </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                                <Form.Item name={["imageAdapter", "failureValues"]} label="失败状态">
+                                    <Select mode="tags" tokenSeparators={[",", "\n"]} />
+                                </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                                <Form.Item name={["imageAdapter", "pollInterval"]} label="轮询间隔（毫秒）">
+                                    <InputNumber min={500} step={500} className="!w-full" />
+                                </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                                <Form.Item name={["imageAdapter", "maxAttempts"]} label="最大轮询次数">
+                                    <InputNumber min={1} max={1800} className="!w-full" />
                                 </Form.Item>
                             </Col>
                         </Row>
@@ -1346,6 +1448,7 @@ function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}
         promptSync: {
             enabled: setting.promptSync?.enabled !== false,
             cron: setting.promptSync?.cron || "*/5 * * * *",
+            sources: (setting.promptSync?.sources || []).filter((source) => source.id && source.url).map((source) => ({ id: source.id, name: source.name || source.id, url: source.url, enabled: source.enabled !== false })),
         },
         aiLog: {
             localDirectReportEnabled: setting.aiLog?.localDirectReportEnabled === true,
@@ -1432,7 +1535,7 @@ function normalizeStorageProvider(item: Partial<AdminStorageProvider> = {}): Adm
 function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChannel {
     return {
         id: item.id || "",
-        protocol: item.protocol === "gemini" ? "gemini" : "openai",
+        protocol: item.protocol === "gemini" || item.protocol === "ark" ? item.protocol : "openai",
         name: item.name || "",
         baseUrl: item.baseUrl || "",
         apiKey: item.apiKey || "",
@@ -1441,6 +1544,14 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
         timeout: Math.max(1, Number(item.timeout) || 600),
         enabled: item.enabled !== false,
         remark: item.remark || "",
+        imageAdapter: {
+            ...emptyChannel.imageAdapter!,
+            ...(item.imageAdapter || {}),
+            successValues: item.imageAdapter?.successValues || emptyChannel.imageAdapter!.successValues,
+            failureValues: item.imageAdapter?.failureValues || emptyChannel.imageAdapter!.failureValues,
+            resultPaths: item.imageAdapter?.resultPaths || emptyChannel.imageAdapter!.resultPaths,
+            errorPaths: item.imageAdapter?.errorPaths || emptyChannel.imageAdapter!.errorPaths,
+        },
     };
 }
 

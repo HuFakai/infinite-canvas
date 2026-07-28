@@ -21,7 +21,7 @@
 - 创作工作流：支持公开/个人模板、变量表单、AI 创建工作流、单图/多图系列工作流、参考图输入和结果自动进入生图历史。
 - 画布助手：围绕选中节点和上游节点对话、生图，并把结果插回画布；支持网页 Agent Loop 和本地 Canvas Agent 纯生图工具子集。
 - 提示词与素材：提示词库、服务器素材库和“我的素材”可在生图、画布 AI 和工作流中复用。
-- 会员与支付：合入上游 PR #43 的会员套餐、订单、ZPay/支付宝/微信配置、OIDC 登录、生图排行榜和站点配置。
+- 会员与支付：合入上游 PR #43 的会员套餐、订单、ZPay/支付宝/微信配置、OIDC 登录和站点配置。
 - 存储：保留浏览器 IndexedDB，本版本新增 SQLite 元数据 + S3/R2 图片对象存储，可配置 Cloudflare R2。
 
 完整功能说明见 [docs/features.md](docs/features.md)。
@@ -124,7 +124,9 @@ npm run dev
 - [后端数据库说明](docs/backend-database.md)
 - [系统配置数据结构](docs/system-settings.md)
 - [接口响应约定](docs/api-response.md)
+- [图片接口故障模拟器](docs/image-api-fixtures.md)
 - [上游/二开功能归属与合并检查](docs/upstream-merge-v0.3.3.md)
+- [上游与生图参考项目功能审查](docs/upstream-and-playground-review.md)
 - [贡献指南](CONTRIBUTING.md)
 - [安全说明](SECURITY.md)
 

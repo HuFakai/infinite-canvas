@@ -478,6 +478,7 @@ func normalizeModelChannelPath(path string) string {
 
 func normalizeModelChannel(channel model.ModelChannel) model.ModelChannel {
 	channel.Protocol = normalizeChannelProtocol(channel.Protocol)
+	channel.ImageAdapter = normalizeImageChannelAdapter(channel.ImageAdapter)
 	if channel.ID == "" {
 		channel.ID = stableModelChannelID(channel)
 	}
@@ -493,9 +494,47 @@ func normalizeModelChannel(channel model.ModelChannel) model.ModelChannel {
 	return channel
 }
 
+func normalizeImageChannelAdapter(adapter *model.ImageChannelAdapter) *model.ImageChannelAdapter {
+	if adapter == nil {
+		return nil
+	}
+	if adapter.CreatePath == "" {
+		adapter.CreatePath = "/images/generations"
+	}
+	if adapter.TaskIDPath == "" {
+		adapter.TaskIDPath = "id"
+	}
+	if adapter.StatusField == "" {
+		adapter.StatusField = "status"
+	}
+	if adapter.PollInterval < 500 {
+		adapter.PollInterval = 2000
+	}
+	if adapter.MaxAttempts <= 0 {
+		adapter.MaxAttempts = 300
+	}
+	if len(adapter.SuccessValues) == 0 {
+		adapter.SuccessValues = []string{"succeeded", "completed", "success"}
+	}
+	if len(adapter.FailureValues) == 0 {
+		adapter.FailureValues = []string{"failed", "error", "canceled"}
+	}
+	if len(adapter.ResultPaths) == 0 {
+		adapter.ResultPaths = []string{"data", "images", "results", "output"}
+	}
+	if len(adapter.ErrorPaths) == 0 {
+		adapter.ErrorPaths = []string{"error.message", "message", "msg"}
+	}
+	return adapter
+}
+
 func normalizeChannelProtocol(protocol string) string {
-	if strings.EqualFold(strings.TrimSpace(protocol), "gemini") {
+	value := strings.ToLower(strings.TrimSpace(protocol))
+	if value == "gemini" {
 		return "gemini"
+	}
+	if value == "ark" {
+		return "ark"
 	}
 	return "openai"
 }
