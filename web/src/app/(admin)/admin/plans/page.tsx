@@ -93,7 +93,7 @@ export default function AdminPlansPage() {
             width: 110,
             render: (_, item) => <Typography.Text strong>{formatPrice(item.price)}</Typography.Text>,
         },
-        { title: "时长", dataIndex: "durationDays", width: 90, render: (value: number) => `${value} 天` },
+        { title: "时长", dataIndex: "durationDays", width: 90, render: (_, item) => `${item.durationDays} 天` },
         { title: "赠送算力点", dataIndex: "creditsGranted", width: 110 },
         {
             title: "权益",
@@ -113,7 +113,7 @@ export default function AdminPlansPage() {
             render: (_, item) => <Tag color={item.enabled ? "green" : "default"}>{item.enabled ? "上架" : "下架"}</Tag>,
         },
         { title: "排序", dataIndex: "sort", width: 70 },
-        { title: "更新时间", dataIndex: "updatedAt", width: 160, render: (value: string) => (value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "-") },
+        { title: "更新时间", dataIndex: "updatedAt", width: 160, render: (_, item) => (item.updatedAt ? dayjs(item.updatedAt).format("YYYY-MM-DD HH:mm") : "-") },
         {
             title: "操作",
             key: "actions",

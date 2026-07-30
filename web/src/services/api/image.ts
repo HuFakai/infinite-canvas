@@ -53,11 +53,14 @@ type ResponseApiToolDefinition = {
     parameters: Record<string, unknown>;
     strict?: boolean;
 };
-type ResponseApiOutputItem = Record<string, unknown> &
-    (
-        | { type?: "message"; content?: Array<{ type?: string; text?: string }> }
-        | { type?: "function_call"; id?: string; call_id?: string; name?: string; arguments?: string }
-    );
+type ResponseApiOutputItem = Record<string, unknown> & {
+    type?: "message" | "function_call" | "image_generation_call";
+    content?: Array<{ type?: string; text?: string }>;
+    id?: string;
+    call_id?: string;
+    name?: string;
+    arguments?: string;
+};
 
 type ImageApiResponse = {
     data?: Array<Record<string, unknown>>;
@@ -666,9 +669,10 @@ async function parseResponsesStreamResponse(response: Response, mime: string): P
             output.push(item as Record<string, unknown>);
         }
     });
-    const combinedOutput = [...((completedPayload?.output || []) as Record<string, unknown>[]), ...output];
+    const finalPayload = completedPayload as ResponsesApiResponse | null;
+    const combinedOutput = [...((finalPayload?.output || []) as Record<string, unknown>[]), ...output];
     try {
-        return parseResponsesPayload({ ...(completedPayload || {}), output: combinedOutput }, mime);
+        return parseResponsesPayload({ ...(finalPayload || {}), output: combinedOutput }, mime);
     } catch (error) {
         if (!partialImages.length) {
             throw new ImageRequestError(error instanceof Error ? error.message : "Responses API 没有返回图片", {
@@ -734,6 +738,10 @@ function activeProtocol(config: AiConfig) {
     if (config.channelMode === "local") return localChannelForActiveModel(config)?.protocol || "openai";
     const channelId = channelIdForActiveModel(config);
     return config.publicChannels.find((channel) => channel.id === channelId)?.protocol || config.publicChannels.find((channel) => channel.models.includes(config.model))?.protocol || "openai";
+}
+
+function activeLocalProtocol(config: AiConfig) {
+    return config.channelMode === "local" ? activeProtocol(config) : "openai";
 }
 
 function geminiConfig(config: AiConfig): AiConfig {
@@ -837,7 +845,7 @@ function parseToolResponse(payload: ResponsesApiResponse): ToolResponseResult {
             .map((item) => item.text || "")
             .join("");
     const toolCalls = output
-        .filter((item): item is Extract<ResponseApiOutputItem, { type?: "function_call" }> => item.type === "function_call")
+        .filter((item) => item.type === "function_call")
         .map((item) => ({
             id: stringValue(item.call_id) || stringValue(item.id) || nanoid(),
             type: "function" as const,
@@ -879,8 +887,9 @@ function consumeResponseStreamText(state: ResponseStreamState, text: string, onD
     for (;;) {
         const match = state.buffer.match(/\r?\n\r?\n/);
         if (!match) break;
-        consumeResponseStreamBlock(state.buffer.slice(0, match.index), state, onDelta);
-        state.buffer = state.buffer.slice(match.index + match[0].length);
+        const boundaryIndex = match.index ?? 0;
+        consumeResponseStreamBlock(state.buffer.slice(0, boundaryIndex), state, onDelta);
+        state.buffer = state.buffer.slice(boundaryIndex + match[0].length);
     }
     if (flush && state.buffer.trim()) {
         consumeResponseStreamBlock(state.buffer, state, onDelta);
@@ -1016,8 +1025,9 @@ function consumeGeminiStreamText(state: GeminiStreamState, text: string, onDelta
     for (;;) {
         const match = state.buffer.match(/\r?\n\r?\n/);
         if (!match) break;
-        consumeGeminiStreamBlock(state.buffer.slice(0, match.index), state, onDelta);
-        state.buffer = state.buffer.slice(match.index + match[0].length);
+        const boundaryIndex = match.index ?? 0;
+        consumeGeminiStreamBlock(state.buffer.slice(0, boundaryIndex), state, onDelta);
+        state.buffer = state.buffer.slice(boundaryIndex + match[0].length);
     }
     if (flush && state.buffer.trim()) {
         consumeGeminiStreamBlock(state.buffer, state, onDelta);

@@ -46,21 +46,21 @@ export default function AdminOrdersPage() {
                 </Flex>
             ),
         },
-        { title: "用户", dataIndex: "userId", width: 180, render: (value: string) => <Typography.Text type="secondary" copyable>{value}</Typography.Text> },
-        { title: "金额", dataIndex: "amount", width: 110, render: (value: number) => <Typography.Text strong>{formatPrice(value)}</Typography.Text> },
-        { title: "支付方式", dataIndex: "paymentProvider", width: 110, render: (value: string) => providerLabel[value] || value || "-" },
+        { title: "用户", dataIndex: "userId", width: 180, render: (_, item) => <Typography.Text type="secondary" copyable>{item.userId}</Typography.Text> },
+        { title: "金额", dataIndex: "amount", width: 110, render: (_, item) => <Typography.Text strong>{formatPrice(item.amount)}</Typography.Text> },
+        { title: "支付方式", dataIndex: "paymentProvider", width: 110, render: (_, item) => providerLabel[item.paymentProvider] || item.paymentProvider || "-" },
         {
             title: "状态",
             dataIndex: "status",
             width: 100,
-            render: (value: MembershipOrderStatus) => {
-                const item = statusLabel[value] || { color: "default", text: value };
-                return <Tag color={item.color}>{item.text}</Tag>;
+            render: (_, order) => {
+                const status = statusLabel[order.status] || { color: "default", text: order.status };
+                return <Tag color={status.color}>{status.text}</Tag>;
             },
         },
-        { title: "支付凭证", dataIndex: "paymentId", width: 160, render: (value: string) => value || "-" },
-        { title: "下单时间", dataIndex: "createdAt", width: 160, render: (value: string) => (value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "-") },
-        { title: "支付时间", dataIndex: "paidAt", width: 160, render: (value: string) => (value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "-") },
+        { title: "支付凭证", dataIndex: "paymentId", width: 160, render: (_, item) => item.paymentId || "-" },
+        { title: "下单时间", dataIndex: "createdAt", width: 160, render: (_, item) => (item.createdAt ? dayjs(item.createdAt).format("YYYY-MM-DD HH:mm") : "-") },
+        { title: "支付时间", dataIndex: "paidAt", width: 160, render: (_, item) => (item.paidAt ? dayjs(item.paidAt).format("YYYY-MM-DD HH:mm") : "-") },
         {
             title: "操作",
             key: "actions",

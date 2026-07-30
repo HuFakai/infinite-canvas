@@ -1,11 +1,9 @@
 ---
-title: v0.3.6 候选发布说明
-description: 服务器验收前使用的 GitHub Release 草稿，不代表版本已经发布
+title: v0.3.6 发布说明
+description: v0.3.6 的功能、修复和升级验证说明
 ---
 
-# v0.3.6 候选发布说明
-
-> 当前内容仅作为 Release 草稿随源码保存。`VERSION`、Git tag 和 GitHub Release 暂不创建，等待服务器线上部署验收通过后再发布。
+# v0.3.6 发布说明
 
 ## 主要更新
 
@@ -26,8 +24,17 @@ description: 服务器验收前使用的 GitHub Release 草稿，不代表版本
 - 声明式异步渠道只有提取到有效图片地址、Data URL 或 Base64 图片时才保留算力点消费。
 - 禁用的标准 JSON 提示词来源不再出现在提示词分类中。
 - 通用节点组会在成员移动、缩放、删除或重新成组后自动更新关系和边界。
+- 修复发布前严格类型审查发现的 Gemini 本地协议判定、Responses 图片/工具输出、Canvas Agent 提示词回退和管理后台表格类型问题。
 
-## 服务器验收重点
+## 发布前检查
+
+- `go test ./...`
+- `cd web && npx tsc --noEmit`
+- `npx tsc --noEmit -p canvas-agent/tsconfig.json`
+
+以上检查在发布提交前均已通过。
+
+## 部署后验收重点
 
 - 使用同模型的多个本地渠道生成图片，确认卡片渠道名称准确。
 - 分别使用 Images、Responses、Gemini 和 Ark 的参考图渠道验证 AI 超分、失败返还、AI 日志和对象存储。

@@ -32,10 +32,11 @@ export async function getImageThumbnail(key: string, source: string) {
 
 export function warmImageThumbnails(images: Array<{ id: string; dataUrl: string; storageKey?: string }>) {
     const run = () => images.forEach((image) => void getImageThumbnail(image.storageKey || image.id, image.dataUrl).catch(() => {}));
-    if ("requestIdleCallback" in window) {
-        window.requestIdleCallback(run, { timeout: 3000 });
+    const requestIdleCallback = window.requestIdleCallback;
+    if (typeof requestIdleCallback === "function") {
+        requestIdleCallback(run, { timeout: 3000 });
     } else {
-        window.setTimeout(run, 100);
+        globalThis.setTimeout(run, 100);
     }
 }
 

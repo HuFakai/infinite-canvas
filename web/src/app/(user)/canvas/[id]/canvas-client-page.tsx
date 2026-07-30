@@ -2542,7 +2542,7 @@ function InfiniteCanvasPage() {
                         const target = next.nodes.find((node) => node.id === op.nodeId);
                         if (!target) return;
                         const mode = op.mode || target.metadata?.generationMode || "image";
-                        const prompt = op.prompt || target.metadata?.prompt || target.metadata?.composerContent || "";
+                        const prompt = op.prompt || target.metadata?.prompt || target.metadata?.content || "";
                         void handleGenerateNode(op.nodeId, mode, prompt);
                     });
                 }, 0);

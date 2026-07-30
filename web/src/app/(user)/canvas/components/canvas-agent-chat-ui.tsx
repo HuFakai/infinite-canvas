@@ -5,7 +5,7 @@ import { Button, Tooltip } from "antd";
 import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, UserRound, Wrench, X, XCircle } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
-import type { LocalUser } from "@/stores/use-user-store";
+import type { AuthUser } from "@/services/api/auth";
 
 export type CanvasAgentChatAttachment = { id: string; name: string; url: string };
 export type CanvasAgentMode = "online" | "local";
@@ -21,7 +21,7 @@ export type CanvasAgentChatMessage = {
 
 const WORKING_TEXT = "working...";
 
-export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: LocalUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
+export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: AuthUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
     const isUser = item.role === "user";
     const isSystem = item.role === "system";
     const color = item.role === "error" ? "#dc2626" : item.role === "tool" ? "#2563eb" : theme.node.text;
@@ -288,7 +288,7 @@ function AgentAvatar({ theme }: { theme: (typeof canvasThemes)[keyof typeof canv
     );
 }
 
-function AgentUserAvatar({ user, theme }: { user: LocalUser | null; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function AgentUserAvatar({ user, theme }: { user: AuthUser | null; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const avatarUrl = user?.avatarUrl?.trim();
     return (
         <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-full" style={{ color: theme.node.text }}>

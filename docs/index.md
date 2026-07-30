@@ -30,7 +30,7 @@
 
 - [待测试](pending-test.md)
 - [TODO](todo.md)
-- [v0.3.6 候选发布说明](release-v0.3.6-draft.md)
+- [v0.3.6 发布说明](release-v0.3.6.md)
 
 ## 说明
 
