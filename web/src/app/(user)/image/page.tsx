@@ -227,7 +227,12 @@ export default function ImagePage() {
             const pageEntries = filtered.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize);
             const rawLogs = await readImageHistoryLogsByIds<GenerationLog>(pageEntries.map((entry) => entry.id));
             const rawById = new Map(rawLogs.map((log) => [log.id, log]));
-            const normalized = await Promise.all(pageEntries.map((entry) => rawById.get(entry.id)).filter((log): log is GenerationLog => Boolean(log)).map((log) => normalizeLog(log)));
+            const pageLogs: GenerationLog[] = [];
+            pageEntries.forEach((entry) => {
+                const log = rawById.get(entry.id);
+                if (log) pageLogs.push(log);
+            });
+            const normalized = await Promise.all(pageLogs.map((log) => normalizeLog(log)));
             if (!active) return;
             setHistoryIndex(index);
             setHistoryTotal(filtered.length);

@@ -61,9 +61,12 @@ export async function rebuildImageHistoryIndex() {
     return entries;
 }
 
-export async function readImageHistoryLogsByIds<T>(ids: string[]) {
+export async function readImageHistoryLogsByIds<T>(ids: string[]): Promise<T[]> {
     const values = await Promise.all(ids.map((id) => logStore.getItem<T>(id)));
-    return values.filter((value): value is T => Boolean(value));
+    return values.reduce<T[]>((items, value) => {
+        if (value) items.push(value as T);
+        return items;
+    }, []);
 }
 
 export async function readAllImageHistoryLogs<T extends { createdAt?: number }>() {
