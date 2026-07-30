@@ -2,6 +2,8 @@
 
 ## Unreleased
 
++ [优化] 生图工作台历史改为 IndexedDB 轻量索引和分页读取，默认每页 24 条；历史图、分类封面和参考图按视口懒加载，缩略图限制并发，远程 R2/S3 地址不再因跨域缩略图请求导致卡片空白。
+
 ## v0.3.6 - 2026-07-31
 
 + [文档] 审查上游 `basketikun/infinite-canvas@f76f81c` 和 `CookSleep/gpt_image_playground@85af989`，记录新增功能、合并理由、架构冲突及纯生图后续候选路线。

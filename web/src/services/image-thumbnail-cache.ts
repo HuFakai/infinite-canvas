@@ -6,6 +6,9 @@ type ThumbnailEntry = { dataUrl: string; accessedAt: number };
 
 const thumbnailStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_thumbnail_cache" });
 const pending = new Map<string, Promise<string>>();
+const queue: Array<() => void> = [];
+let activeTasks = 0;
+const MAX_CONCURRENT_TASKS = 2;
 const MAX_ENTRIES = 120;
 const THUMBNAIL_SIZE = 480;
 
@@ -19,7 +22,7 @@ export async function getImageThumbnail(key: string, source: string) {
     }
     const current = pending.get(cacheKey);
     if (current) return current;
-    const task = createThumbnail(source)
+    const task = enqueueThumbnail(() => createThumbnail(source))
         .then(async (dataUrl) => {
             await thumbnailStore.setItem(cacheKey, { dataUrl, accessedAt: Date.now() });
             void trimThumbnailCache();
@@ -28,16 +31,6 @@ export async function getImageThumbnail(key: string, source: string) {
         .finally(() => pending.delete(cacheKey));
     pending.set(cacheKey, task);
     return task;
-}
-
-export function warmImageThumbnails(images: Array<{ id: string; dataUrl: string; storageKey?: string }>) {
-    const run = () => images.forEach((image) => void getImageThumbnail(image.storageKey || image.id, image.dataUrl).catch(() => {}));
-    const requestIdleCallback = window.requestIdleCallback;
-    if (typeof requestIdleCallback === "function") {
-        requestIdleCallback(run, { timeout: 3000 });
-    } else {
-        globalThis.setTimeout(run, 100);
-    }
 }
 
 async function createThumbnail(source: string) {
@@ -73,4 +66,23 @@ function thumbnailKey(value: string) {
         hash = Math.imul(hash, 16777619);
     }
     return `thumb:${(hash >>> 0).toString(36)}`;
+}
+
+function enqueueThumbnail(task: () => Promise<string>) {
+    return new Promise<string>((resolve, reject) => {
+        queue.push(() => {
+            activeTasks += 1;
+            void task()
+                .then(resolve, reject)
+                .finally(() => {
+                    activeTasks -= 1;
+                    runNextThumbnailTasks();
+                });
+        });
+        runNextThumbnailTasks();
+    });
+}
+
+function runNextThumbnailTasks() {
+    while (activeTasks < MAX_CONCURRENT_TASKS && queue.length) queue.shift()?.();
 }

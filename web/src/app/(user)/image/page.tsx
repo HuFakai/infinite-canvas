@@ -24,9 +24,8 @@ import {
     Upload,
     WandSparkles,
 } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Segmented, Tag, Typography } from "antd";
-import localforage from "localforage";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Pagination, Segmented, Skeleton, Tag, Typography } from "antd";
 import { saveAs } from "file-saver";
 
 import { ImageSettingsPanel, imageFormatLabel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
@@ -46,8 +45,21 @@ import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { ImageRequestError, requestEdit, requestGeneration } from "@/services/api/image";
 import { fetchUserConfig, syncUserImageHistory } from "@/services/api/user-config";
+import {
+    putImageHistoryCategories,
+    putImageHistoryLog,
+    putImageHistoryLogs,
+    readAllImageHistoryLogs,
+    readImageHistoryCategories,
+    readImageHistoryIndex,
+    readImageHistoryLogsByIds,
+    removeImageHistoryLogs,
+    replaceImageHistoryLogs,
+    type ImageHistoryIndexEntry,
+    type ImageHistoryIndexImage,
+} from "@/services/image-history-storage";
 import { deleteStoredImages, imageToBlob, imageToDataUrl, resolveImageUrl, uploadImage } from "@/services/image-storage";
-import { getImageThumbnail, warmImageThumbnails } from "@/services/image-thumbnail-cache";
+import { getImageThumbnail } from "@/services/image-thumbnail-cache";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
@@ -120,13 +132,10 @@ type WorkbenchLayout = "side" | "bottom";
 type CollapsibleSectionKey = "prompt" | "references" | "settings";
 type CollapsedSections = Record<CollapsibleSectionKey, boolean>;
 
-const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
-const CATEGORY_STORE_KEY = "infinite-canvas:image_generation_categories";
 const WORKBENCH_LAYOUT_KEY = "infinite-canvas:image-workbench-layout";
 const RESULT_VIEW_MODE_KEY = "infinite-canvas:image-result-view-mode";
 const WORKFLOW_BUTTON_POSITION_KEY = "infinite-canvas:workflow-button-position";
-const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
-const categoryStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_categories" });
+const DEFAULT_HISTORY_PAGE_SIZE = 24;
 const defaultCollapsedSections: CollapsedSections = { prompt: false, references: true, settings: true };
 
 export default function ImagePage() {
@@ -145,6 +154,12 @@ export default function ImagePage() {
     const [uploadingCount, setUploadingCount] = useState(0);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
+    const [historyIndex, setHistoryIndex] = useState<ImageHistoryIndexEntry[]>([]);
+    const [historyTotal, setHistoryTotal] = useState(0);
+    const [historyPage, setHistoryPage] = useState(1);
+    const [historyPageSize, setHistoryPageSize] = useState(DEFAULT_HISTORY_PAGE_SIZE);
+    const [historyLoading, setHistoryLoading] = useState(true);
+    const [historyRevision, setHistoryRevision] = useState(0);
     const [categories, setCategories] = useState<GenerationCategory[]>([]);
     const [resultViewMode, setResultViewModeState] = useState<ResultViewMode>("all");
     const [activeResultCategoryId, setActiveResultCategoryId] = useState<string | null>(null);
@@ -161,6 +176,9 @@ export default function ImagePage() {
     const workflowButtonRef = useRef<HTMLButtonElement>(null);
     const workflowButtonDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
     const accountHistorySyncEnabledRef = useRef(false);
+    const accountHistoryLoadTokenRef = useRef("");
+    const accountHistorySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const historyQueryKeyRef = useRef("");
     const saveLogChainRef = useRef<Promise<void>>(Promise.resolve());
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
@@ -169,7 +187,6 @@ export default function ImagePage() {
     const pendingCount = results.filter((item) => item.status === "pending").length;
 
     useEffect(() => {
-        void refreshLogs();
         void refreshCategories();
         try {
             const storedLayout = window.localStorage?.getItem(WORKBENCH_LAYOUT_KEY);
@@ -193,9 +210,61 @@ export default function ImagePage() {
     }, []);
 
     useEffect(() => {
-        if (!isUserReady || !token) return;
+        let active = true;
+        void (async () => {
+            const queryKey = `${resultViewMode}:${activeResultCategoryId || "uncategorized"}:${historyPage}:${historyPageSize}`;
+            const queryChanged = historyQueryKeyRef.current !== queryKey;
+            historyQueryKeyRef.current = queryKey;
+            setHistoryLoading(true);
+            if (queryChanged) setLogs([]);
+            const index = await readImageHistoryIndex();
+            const filtered = filterImageHistoryIndex(index, resultViewMode, activeResultCategoryId);
+            const maxPage = Math.max(1, Math.ceil(filtered.length / historyPageSize));
+            if (historyPage > maxPage) {
+                setHistoryPage(maxPage);
+                return;
+            }
+            const pageEntries = filtered.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize);
+            const rawLogs = await readImageHistoryLogsByIds<GenerationLog>(pageEntries.map((entry) => entry.id));
+            const rawById = new Map(rawLogs.map((log) => [log.id, log]));
+            const normalized = await Promise.all(pageEntries.map((entry) => rawById.get(entry.id)).filter((log): log is GenerationLog => Boolean(log)).map((log) => normalizeLog(log)));
+            if (!active) return;
+            setHistoryIndex(index);
+            setHistoryTotal(filtered.length);
+            setLogs(normalized);
+        })()
+            .catch(() => {
+                if (active) setLogs([]);
+            })
+            .finally(() => {
+                if (active) setHistoryLoading(false);
+            });
+        return () => {
+            active = false;
+        };
+    }, [activeResultCategoryId, historyPage, historyPageSize, historyRevision, resultViewMode]);
+
+    useEffect(() => {
+        setHistoryPage(1);
+    }, [activeResultCategoryId, resultViewMode]);
+
+    useEffect(() => {
+        if (!isUserReady) return;
+        if (!token) {
+            accountHistoryLoadTokenRef.current = "";
+            return;
+        }
+        if (accountHistoryLoadTokenRef.current === token) return;
+        accountHistoryLoadTokenRef.current = token;
         void loadAccountImageHistory(token);
     }, [isUserReady, token]);
+
+    useEffect(
+        () => () => {
+            if (accountHistorySyncTimerRef.current) clearTimeout(accountHistorySyncTimerRef.current);
+        },
+        [token],
+    );
 
     useEffect(() => {
         if (!pendingCount) return;
@@ -320,7 +389,8 @@ export default function ImagePage() {
     const removeReference = async (id: string) => {
         const reference = references.find((item) => item.id === id);
         setReferences((value) => value.filter((ref) => ref.id !== id));
-        if (!reference || !shouldDeleteReferenceFile(reference, logs, results)) {
+        const storedLogs = await readAllImageHistoryLogs<GenerationLog>();
+        if (!reference || !shouldDeleteReferenceFile(reference, storedLogs, results)) {
             message.success("已从工作台移除参考图");
             return;
         }
@@ -554,15 +624,17 @@ export default function ImagePage() {
     };
 
     const deleteSelectedLogs = () => {
-        const deletedLogs = logs.filter((log) => selectedLogIds.includes(log.id));
-        const nextLogs = logs.filter((log) => !selectedLogIds.includes(log.id));
-        const imageKeys = disposableLogStorageKeys(deletedLogs, nextLogs);
-        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(async () => {
-            setLogs(nextLogs);
+        void (async () => {
+            const storedLogs = await readAllImageHistoryLogs<GenerationLog>();
+            const deletedLogs = storedLogs.filter((log) => selectedLogIds.includes(log.id));
+            const nextLogs = storedLogs.filter((log) => !selectedLogIds.includes(log.id));
+            const imageKeys = disposableLogStorageKeys(deletedLogs, nextLogs);
+            await Promise.all([deleteStoredImages(imageKeys), removeImageHistoryLogs(selectedLogIds)]);
+            setLogs((value) => value.filter((log) => !selectedLogIds.includes(log.id)));
             setReferences((value) => value.filter((item) => !item.storageKey || !imageKeys.includes(item.storageKey)));
-            await persistImageHistory(nextLogs, categories);
+            schedulePersistImageHistory(categories);
             await refreshLogs();
-        });
+        })();
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults((value) => value.filter((item) => item.status === "pending"));
@@ -579,12 +651,13 @@ export default function ImagePage() {
             cancelText: "取消",
             okButtonProps: { danger: true },
             onOk: async () => {
-                const nextLogs = logs.filter((item) => item.id !== log.id);
+                const storedLogs = await readAllImageHistoryLogs<GenerationLog>();
+                const nextLogs = storedLogs.filter((item) => item.id !== log.id);
                 const imageKeys = disposableLogStorageKeys([log], nextLogs);
-                await Promise.all([deleteStoredImages(imageKeys), logStore.removeItem(log.id)]);
-                setLogs(nextLogs);
+                await Promise.all([deleteStoredImages(imageKeys), removeImageHistoryLogs([log.id])]);
+                setLogs((value) => value.filter((item) => item.id !== log.id));
                 setReferences((value) => value.filter((item) => !item.storageKey || !imageKeys.includes(item.storageKey)));
-                await persistImageHistory(nextLogs, categories);
+                schedulePersistImageHistory(categories);
                 setSelectedLogIds((value) => value.filter((id) => id !== log.id));
                 if (previewLog?.id === log.id) setPreviewLog(null);
                 await refreshLogs();
@@ -600,18 +673,16 @@ export default function ImagePage() {
             } catch {
                 // Ignore previous errors so the chain doesn't break permanently
             }
-            const storedLogs = await readStoredLogs();
-            const nextLogs = [log, ...storedLogs.filter((item) => item.id !== log.id)];
-            setLogs(nextLogs);
-            await logStore.setItem(log.id, serializeLog(log));
-            await persistImageHistory(nextLogs, categories);
+            await putImageHistoryLog(serializeLog(log));
+            setHistoryPage(1);
             await refreshLogs();
+            schedulePersistImageHistory(categories);
         })();
         saveLogChainRef.current = nextChain;
         await nextChain;
     };
 
-    const refreshLogs = async () => setLogs(await readStoredLogs());
+    const refreshLogs = async () => setHistoryRevision((value) => value + 1);
     const refreshCategories = async () => setCategories(await readStoredCategories());
 
     const loadAccountImageHistory = async (currentToken: string) => {
@@ -622,33 +693,43 @@ export default function ImagePage() {
             const remoteLogs = Array.isArray(remote?.logs) ? remote.logs : [];
             const remoteCategories = Array.isArray(remote?.categories) ? remote.categories : [];
             
-            const localLogs = await readStoredLogs();
+            const localIndex = await readImageHistoryIndex();
             const localCategories = await readStoredCategories();
-            const localHasData = localLogs.length > 0 || localCategories.length > 0;
+            const localHasData = localIndex.length > 0 || localCategories.length > 0;
             const remoteHasData = remoteLogs.length > 0 || remoteCategories.length > 0;
 
             if (accountHistorySyncEnabledRef.current) {
-                const remoteNormalized = await Promise.all(remoteLogs.map(normalizeLog));
-                await replaceStoredImageHistory(remoteNormalized, remoteCategories);
-                setLogs(remoteNormalized);
+                await replaceStoredImageHistory(remoteLogs, remoteCategories);
                 setCategories(remoteCategories);
+                setHistoryPage(1);
+                await refreshLogs();
                 return;
             } else if (remoteHasData && !localHasData) {
-                const remoteNormalized = await Promise.all(remoteLogs.map(normalizeLog));
-                await replaceStoredImageHistory(remoteNormalized, remoteCategories);
-                setLogs(remoteNormalized);
+                await replaceStoredImageHistory(remoteLogs, remoteCategories);
                 setCategories(remoteCategories);
+                setHistoryPage(1);
+                await refreshLogs();
             }
         } catch {
             // Keep local history available when account sync fails.
         }
     };
 
-    const persistImageHistory = async (nextLogs: GenerationLog[], nextCategories: GenerationCategory[]) => {
+    const persistImageHistory = async (nextCategories: GenerationCategory[]) => {
         if (!token || !accountHistorySyncEnabledRef.current) return;
-        await syncUserImageHistory(token, imageHistorySnapshot(nextLogs, nextCategories)).catch(() => {
+        const storedLogs = await readAllImageHistoryLogs<GenerationLog>();
+        await syncUserImageHistory(token, imageHistorySnapshot(storedLogs, nextCategories)).catch(() => {
             accountHistorySyncEnabledRef.current = false;
         });
+    };
+
+    const schedulePersistImageHistory = (nextCategories: GenerationCategory[]) => {
+        if (!token || !accountHistorySyncEnabledRef.current) return;
+        if (accountHistorySyncTimerRef.current) clearTimeout(accountHistorySyncTimerRef.current);
+        accountHistorySyncTimerRef.current = setTimeout(() => {
+            accountHistorySyncTimerRef.current = null;
+            void persistImageHistory(nextCategories);
+        }, 800);
     };
 
     const createCategory = async (name: string) => {
@@ -662,8 +743,8 @@ export default function ImagePage() {
         const nextCategory = { id: nanoid(), name: trimmedName, createdAt: Date.now() };
         const nextCategories = [...categories, nextCategory];
         setCategories(nextCategories);
-        await categoryStore.setItem(CATEGORY_STORE_KEY, nextCategories);
-        await persistImageHistory(logs, nextCategories);
+        await putImageHistoryCategories(nextCategories);
+        schedulePersistImageHistory(nextCategories);
         return nextCategory;
     };
 
@@ -675,8 +756,8 @@ export default function ImagePage() {
         }
         const nextCategories = categories.map((item) => (item.id === category.id ? { ...item, name: trimmedName } : item));
         setCategories(nextCategories);
-        await categoryStore.setItem(CATEGORY_STORE_KEY, nextCategories);
-        await persistImageHistory(logs, nextCategories);
+        await putImageHistoryCategories(nextCategories);
+        schedulePersistImageHistory(nextCategories);
         message.success("已重命名分类");
     };
 
@@ -689,12 +770,13 @@ export default function ImagePage() {
             okButtonProps: { danger: true },
             onOk: async () => {
                 const nextCategories = categories.filter((item) => item.id !== category.id);
-                const nextLogs = logs.map((log) => ({ ...log, categoryIds: log.categoryIds.filter((id) => id !== category.id) }));
+                const storedLogs = await readAllImageHistoryLogs<GenerationLog>();
+                const nextLogs = storedLogs.map((log) => ({ ...log, categoryIds: (log.categoryIds || []).filter((id) => id !== category.id) }));
                 setCategories(nextCategories);
-                setLogs(nextLogs);
-                await categoryStore.setItem(CATEGORY_STORE_KEY, nextCategories);
-                await Promise.all(nextLogs.map((log) => logStore.setItem(log.id, serializeLog(log))));
-                await persistImageHistory(nextLogs, nextCategories);
+                await putImageHistoryCategories(nextCategories);
+                await putImageHistoryLogs(nextLogs.map(serializeLog));
+                await refreshLogs();
+                schedulePersistImageHistory(nextCategories);
                 message.success("已删除分类");
             },
         });
@@ -704,8 +786,8 @@ export default function ImagePage() {
         const nextLog = { ...log, categoryIds };
         const nextLogs = logs.map((item) => (item.id === log.id ? nextLog : item));
         setLogs(nextLogs);
-        await logStore.setItem(log.id, serializeLog(nextLog));
-        await persistImageHistory(nextLogs, categories);
+        await putImageHistoryLog(serializeLog(nextLog));
+        schedulePersistImageHistory(categories);
         await refreshLogs();
         message.success(categoryIds.length ? "已更新分类" : "已移至未分类");
     };
@@ -716,28 +798,29 @@ export default function ImagePage() {
     };
 
     const previewGenerationLog = async (log: GenerationLog) => {
-        setPreviewLog(log);
-        setPrompt(log.prompt);
-        setReferences(log.references || []);
-        setCollapsedSections((value) => ({ ...value, prompt: false, references: !log.references?.length }));
-        if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
-        if (log.config.channelId) {
-            updateConfig("imageChannelId", log.config.channelId);
-            updateConfig("activeChannelId", log.config.channelId);
+        const hydratedLog = await normalizeLog(log, true);
+        setPreviewLog(hydratedLog);
+        setPrompt(hydratedLog.prompt);
+        setReferences(hydratedLog.references || []);
+        setCollapsedSections((value) => ({ ...value, prompt: false, references: !hydratedLog.references?.length }));
+        if (hydratedLog.config.imageModel || hydratedLog.model) updateConfig("imageModel", hydratedLog.config.imageModel || hydratedLog.model);
+        if (hydratedLog.config.channelId) {
+            updateConfig("imageChannelId", hydratedLog.config.channelId);
+            updateConfig("activeChannelId", hydratedLog.config.channelId);
         }
-        if (log.config.quality) updateConfig("quality", log.config.quality);
-        if (log.config.size) updateConfig("size", log.config.size);
-        if (log.config.count) updateConfig("count", log.config.count);
-        if (log.config.apiMode) updateConfig("apiMode", log.config.apiMode);
-        if (log.config.outputFormat) updateConfig("outputFormat", log.config.outputFormat);
-        if (log.config.outputCompression) updateConfig("outputCompression", log.config.outputCompression);
-        if (log.config.moderation) updateConfig("moderation", log.config.moderation);
-        if (log.config.timeout) updateConfig("timeout", log.config.timeout);
-        if (typeof log.config.streamImages === "boolean") updateConfig("streamImages", log.config.streamImages);
-        if (log.config.streamPartialImages) updateConfig("streamPartialImages", log.config.streamPartialImages);
-        if (typeof log.config.responseFormatB64Json === "boolean") updateConfig("responseFormatB64Json", log.config.responseFormatB64Json);
-        if (typeof log.config.codexCli === "boolean") updateConfig("codexCli", log.config.codexCli);
-        if (log.config.seed !== undefined) updateConfig("seed", log.config.seed);
+        if (hydratedLog.config.quality) updateConfig("quality", hydratedLog.config.quality);
+        if (hydratedLog.config.size) updateConfig("size", hydratedLog.config.size);
+        if (hydratedLog.config.count) updateConfig("count", hydratedLog.config.count);
+        if (hydratedLog.config.apiMode) updateConfig("apiMode", hydratedLog.config.apiMode);
+        if (hydratedLog.config.outputFormat) updateConfig("outputFormat", hydratedLog.config.outputFormat);
+        if (hydratedLog.config.outputCompression) updateConfig("outputCompression", hydratedLog.config.outputCompression);
+        if (hydratedLog.config.moderation) updateConfig("moderation", hydratedLog.config.moderation);
+        if (hydratedLog.config.timeout) updateConfig("timeout", hydratedLog.config.timeout);
+        if (typeof hydratedLog.config.streamImages === "boolean") updateConfig("streamImages", hydratedLog.config.streamImages);
+        if (hydratedLog.config.streamPartialImages) updateConfig("streamPartialImages", hydratedLog.config.streamPartialImages);
+        if (typeof hydratedLog.config.responseFormatB64Json === "boolean") updateConfig("responseFormatB64Json", hydratedLog.config.responseFormatB64Json);
+        if (typeof hydratedLog.config.codexCli === "boolean") updateConfig("codexCli", hydratedLog.config.codexCli);
+        if (hydratedLog.config.seed !== undefined) updateConfig("seed", hydratedLog.config.seed);
     };
 
     const copyPrompt = async (text: string) => {
@@ -939,6 +1022,11 @@ export default function ImagePage() {
                         <ResultsPanel
                             results={results}
                             logs={logs}
+                            historyIndex={historyIndex}
+                            historyTotal={historyTotal}
+                            historyPage={historyPage}
+                            historyPageSize={historyPageSize}
+                            historyLoading={historyLoading}
                             categories={categories}
                             resultViewMode={resultViewMode}
                             activeCategoryId={activeResultCategoryId}
@@ -947,6 +1035,10 @@ export default function ImagePage() {
                             selectedLogIds={selectedLogIds}
                             activeLogId={previewLog?.id}
                             onSelectedLogIdsChange={setSelectedLogIds}
+                            onHistoryPageChange={(page, pageSize) => {
+                                setHistoryPage(page);
+                                setHistoryPageSize(pageSize);
+                            }}
                             onCreateSession={createSession}
                             onResultViewModeChange={setResultViewMode}
                             onActiveCategoryChange={setActiveResultCategoryId}
@@ -972,6 +1064,11 @@ export default function ImagePage() {
                             className="min-h-[360px] flex-1 pb-40 lg:pb-44"
                             results={results}
                             logs={logs}
+                            historyIndex={historyIndex}
+                            historyTotal={historyTotal}
+                            historyPage={historyPage}
+                            historyPageSize={historyPageSize}
+                            historyLoading={historyLoading}
                             categories={categories}
                             resultViewMode={resultViewMode}
                             activeCategoryId={activeResultCategoryId}
@@ -980,6 +1077,10 @@ export default function ImagePage() {
                             selectedLogIds={selectedLogIds}
                             activeLogId={previewLog?.id}
                             onSelectedLogIdsChange={setSelectedLogIds}
+                            onHistoryPageChange={(page, pageSize) => {
+                                setHistoryPage(page);
+                                setHistoryPageSize(pageSize);
+                            }}
                             onCreateSession={createSession}
                             onResultViewModeChange={setResultViewMode}
                             onActiveCategoryChange={setActiveResultCategoryId}
@@ -1060,10 +1161,10 @@ export default function ImagePage() {
                     onGenerationLogSaved={() => {
                         void (async () => {
                             const nextCategories = await readStoredCategories();
-                            const nextLogs = await readStoredLogs();
                             setCategories(nextCategories);
-                            setLogs(nextLogs);
-                            await persistImageHistory(nextLogs, nextCategories);
+                            setHistoryPage(1);
+                            await refreshLogs();
+                            schedulePersistImageHistory(nextCategories);
                         })();
                     }}
                 />
@@ -1450,6 +1551,11 @@ function ResultsPanel({
     className = "",
     results,
     logs,
+    historyIndex,
+    historyTotal,
+    historyPage,
+    historyPageSize,
+    historyLoading,
     categories,
     resultViewMode,
     activeCategoryId,
@@ -1458,6 +1564,7 @@ function ResultsPanel({
     selectedLogIds,
     activeLogId,
     onSelectedLogIdsChange,
+    onHistoryPageChange,
     onCreateSession,
     onResultViewModeChange,
     onActiveCategoryChange,
@@ -1479,6 +1586,11 @@ function ResultsPanel({
     className?: string;
     results: GenerationResult[];
     logs: GenerationLog[];
+    historyIndex: ImageHistoryIndexEntry[];
+    historyTotal: number;
+    historyPage: number;
+    historyPageSize: number;
+    historyLoading: boolean;
     categories: GenerationCategory[];
     resultViewMode: ResultViewMode;
     activeCategoryId: string | null;
@@ -1487,6 +1599,7 @@ function ResultsPanel({
     selectedLogIds: string[];
     activeLogId?: string;
     onSelectedLogIdsChange: (ids: string[]) => void;
+    onHistoryPageChange: (page: number, pageSize: number) => void;
     onCreateSession: () => void;
     onResultViewModeChange: (mode: ResultViewMode) => void;
     onActiveCategoryChange: (id: string | null) => void;
@@ -1510,11 +1623,14 @@ function ResultsPanel({
     const [categoryName, setCategoryName] = useState("");
     const liveImageIds = new Set(results.map((result) => result.image?.id).filter((id): id is string => Boolean(id)));
     const baseVisibleLogs = logs.filter((log) => !log.images.some((image) => liveImageIds.has(image.id)));
-    const categoryGroups = categories.map((category) => ({ category, logs: baseVisibleLogs.filter((log) => log.categoryIds.includes(category.id)) }));
+    const categoryGroups = categories.map((category) => {
+        const entries = historyIndex.filter((entry) => entry.categoryIds.includes(category.id));
+        return { category, count: entries.length, images: entries.flatMap((entry) => entry.coverImages).slice(0, 6) };
+    });
     const activeCategory = activeCategoryId ? categories.find((category) => category.id === activeCategoryId) : null;
-    const visibleLogs = resultViewMode === "category" ? (activeCategoryId ? baseVisibleLogs.filter((log) => log.categoryIds.includes(activeCategoryId)) : baseVisibleLogs.filter((log) => !log.categoryIds.length)) : baseVisibleLogs;
-    const totalCount = results.length + (resultViewMode === "category" ? (activeCategoryId ? visibleLogs.length : categories.length + visibleLogs.length) : visibleLogs.length);
-    const shouldShowGrid = totalCount > 0;
+    const visibleLogs = baseVisibleLogs;
+    const totalCount = results.length + historyTotal + (resultViewMode === "category" && !activeCategoryId ? categories.length : 0);
+    const shouldShowGrid = totalCount > 0 || historyLoading;
     const allVisibleLogsSelected = Boolean(visibleLogs.length) && visibleLogs.every((log) => selectedLogIds.includes(log.id));
     const toggleVisibleLogs = () => onSelectedLogIdsChange(allVisibleLogsSelected ? selectedLogIds.filter((id) => !visibleLogs.some((log) => log.id === id)) : Array.from(new Set([...selectedLogIds, ...visibleLogs.map((log) => log.id)])));
     const createCategory = async () => {
@@ -1567,7 +1683,7 @@ function ResultsPanel({
                         {resultViewMode === "category" ? "新建分类" : "新建"}
                     </Button>
                     <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!visibleLogs.length} onClick={toggleVisibleLogs}>
-                        {allVisibleLogsSelected ? "取消" : "全选"}
+                        {allVisibleLogsSelected ? "取消本页" : "全选本页"}
                     </Button>
                     <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
                         删除
@@ -1588,12 +1704,20 @@ function ResultsPanel({
                     {resultViewMode === "category" ? (
                         <>
                             {!activeCategoryId
-                                ? categoryGroups.map(({ category, logs: categoryLogs }) => (
-                                      <CategoryCard key={category.id} category={category} logs={categoryLogs} onRename={onRenameCategory} onDelete={onDeleteCategory} onOpen={() => onActiveCategoryChange(category.id)} />
+                                ? categoryGroups.map(({ category, count, images }) => (
+                                      <CategoryCard key={category.id} category={category} count={count} images={images} onRename={onRenameCategory} onDelete={onDeleteCategory} onOpen={() => onActiveCategoryChange(category.id)} />
                                   ))
                                 : null}
                         </>
                     ) : null}
+                    {historyLoading && !visibleLogs.length
+                        ? Array.from({ length: Math.min(6, historyPageSize) }, (_, index) => (
+                              <div key={`history-skeleton-${index}`} className="min-h-[360px] overflow-hidden rounded-lg border border-stone-200 bg-background p-3 dark:border-stone-800 dark:bg-stone-950 sm:min-h-[420px]">
+                                  <Skeleton.Image active className="!h-52 !w-full" />
+                                  <Skeleton active paragraph={{ rows: 5 }} title={false} className="mt-4" />
+                              </div>
+                          ))
+                        : null}
                     {visibleLogs.map((log, index) => (
                         <HistoryLogCard
                             key={log.id}
@@ -1622,6 +1746,19 @@ function ResultsPanel({
                     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有生成图片" />
                 </div>
             )}
+            {historyTotal ? (
+                <div className="mt-5 flex justify-center border-t border-stone-200 pt-4 dark:border-stone-800">
+                    <Pagination
+                        current={historyPage}
+                        pageSize={historyPageSize}
+                        total={historyTotal}
+                        pageSizeOptions={[24, 48, 96]}
+                        showSizeChanger
+                        showTotal={(total) => `共 ${total} 条`}
+                        onChange={onHistoryPageChange}
+                    />
+                </div>
+            ) : null}
             <Modal title="新建分类" open={creatingCategory} onCancel={() => setCreatingCategory(false)} onOk={() => void createCategory()} okText="创建" cancelText="取消" destroyOnHidden>
                 <Input value={categoryName} autoFocus placeholder="输入分类名称" onChange={(event) => setCategoryName(event.target.value)} onPressEnter={() => void createCategory()} />
             </Modal>
@@ -1631,20 +1768,21 @@ function ResultsPanel({
 
 function CategoryCard({
     category,
-    logs,
+    count,
+    images,
     onRename,
     onDelete,
     onOpen,
 }: {
     category: GenerationCategory;
-    logs: GenerationLog[];
+    count: number;
+    images: ImageHistoryIndexImage[];
     onRename: (category: GenerationCategory, name: string) => void;
     onDelete: (category: GenerationCategory) => void;
     onOpen: () => void;
 }) {
     const [editing, setEditing] = useState(false);
     const [name, setName] = useState(category.name);
-    const images = logs.flatMap((log) => log.images).slice(0, 6);
 
     useEffect(() => {
         setName(category.name);
@@ -1664,9 +1802,9 @@ function CategoryCard({
                 {images.length ? (
                     <>
                         {images.map((image, index) => (
-                            <img
+                            <LazyHistoryImage
                                 key={`${image.id}-${index}`}
-                                src={image.dataUrl}
+                                image={image}
                                 alt=""
                                 className={`${images.length === 1 ? "inset-0 size-full rounded-none border-0" : "h-[92%] w-[86%] rounded-lg border border-white/80 dark:border-stone-900"} absolute object-cover shadow-xl transition-transform duration-200 group-hover:scale-[1.02]`}
                                 style={{
@@ -1686,7 +1824,7 @@ function CategoryCard({
                 {editing ? <Input value={name} autoFocus onChange={(event) => setName(event.target.value)} onPressEnter={saveName} onBlur={saveName} /> : <div className="truncate text-sm font-semibold">{category.name}</div>}
             </div>
             <div className="absolute right-1.5 top-1.5 z-10 flex gap-1">
-                <Tag className="m-0 text-[10px]">{logs.length} 条</Tag>
+                <Tag className="m-0 text-[10px]">{count} 条</Tag>
                 <Tag className="m-0 text-[10px]">{images.length} 图</Tag>
             </div>
             <div className="absolute bottom-2 right-2 z-20 flex gap-1">
@@ -1921,7 +2059,7 @@ function HistoryLogCard({
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
 }) {
-    const displayImages = log.images.filter((image) => Boolean(image.dataUrl));
+    const displayImages = log.images.filter((image) => Boolean(image.dataUrl || image.storageKey));
     const firstImage = displayImages[0];
     const totalImageBytes = displayImages.reduce((total, image) => total + (Number(image.bytes) || 0), 0);
     const [expanded, setExpanded] = useState(false);
@@ -2086,12 +2224,12 @@ function HistoryLogCard({
 }
 
 function ReferenceThumbnailOverlay({ references, className = "" }: { references?: ReferenceImage[]; className?: string }) {
-    const visibleReferences = (references || []).filter((item) => Boolean(item.dataUrl)).slice(0, 3);
+    const visibleReferences = (references || []).filter((item) => Boolean(item.dataUrl || item.storageKey)).slice(0, 3);
     if (!visibleReferences.length) return null;
     return (
         <div className={`absolute z-10 flex items-center gap-1 rounded-md bg-black/55 p-1 shadow-sm backdrop-blur ${className}`}>
             {visibleReferences.map((item) => (
-                <img key={item.id} src={item.dataUrl} alt={item.name} className="size-7 rounded border border-white/60 object-cover" />
+                <LazyHistoryImage key={item.id} image={item} alt={item.name} className="size-7 rounded border border-white/60" />
             ))}
             {(references || []).length > visibleReferences.length ? <span className="px-1 text-[10px] text-white">+{(references || []).length - visibleReferences.length}</span> : null}
         </div>
@@ -2157,25 +2295,11 @@ function errorDetail(error: unknown) {
     }
 }
 
-async function readStoredLogs() {
-    if (typeof window === "undefined") return [];
-    try {
-        const values: GenerationLog[] = [];
-        await logStore.iterate<GenerationLog, void>((value) => {
-            values.push(value);
-        });
-        const logs = await Promise.all(values.map(normalizeLog));
-        return logs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    } catch {
-        return [];
-    }
-}
-
 async function readStoredCategories() {
     if (typeof window === "undefined") return [];
     try {
-        const value = await categoryStore.getItem<GenerationCategory[]>(CATEGORY_STORE_KEY);
-        return Array.isArray(value) ? value.filter((item) => item.id && item.name).sort((a, b) => a.createdAt - b.createdAt) : [];
+        const value = await readImageHistoryCategories<GenerationCategory>();
+        return value.filter((item) => item.id && item.name).sort((a, b) => a.createdAt - b.createdAt);
     } catch {
         return [];
     }
@@ -2183,9 +2307,8 @@ async function readStoredCategories() {
 
 async function replaceStoredImageHistory(logs: GenerationLog[], categories: GenerationCategory[]) {
     if (typeof window === "undefined") return;
-    await logStore.clear();
-    await Promise.all(logs.map((log) => logStore.setItem(log.id, serializeLog(log))));
-    await categoryStore.setItem(CATEGORY_STORE_KEY, categories);
+    const normalized = await Promise.all(logs.map((log) => normalizeLog(log)));
+    await Promise.all([replaceImageHistoryLogs(normalized.map(serializeLog)), putImageHistoryCategories(categories)]);
 }
 
 function imageHistorySnapshot(logs: GenerationLog[], categories: GenerationCategory[]) {
@@ -2195,45 +2318,24 @@ function imageHistorySnapshot(logs: GenerationLog[], categories: GenerationCateg
     };
 }
 
-function hasInlineImageData(log: Partial<GenerationLog>) {
-    return [...(log.images || []), ...(log.references || [])].some((item) => item.dataUrl?.startsWith("data:image/"));
-}
-
-async function mergeGenerationLogs(remoteLogs: GenerationLog[], localLogs: GenerationLog[]) {
-    const normalized = await Promise.all([...remoteLogs, ...localLogs].map(normalizeLog));
-    const byId = new Map<string, GenerationLog>();
-    for (const log of normalized) {
-        const existing = byId.get(log.id);
-        if (!existing || log.createdAt >= existing.createdAt || log.images.length + log.failCount > existing.images.length + existing.failCount) {
-            byId.set(log.id, log);
-        }
-    }
-    return [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
-}
-
-function mergeGenerationCategories(remoteCategories: GenerationCategory[], localCategories: GenerationCategory[]) {
-    const byId = new Map<string, GenerationCategory>();
-    [...remoteCategories, ...localCategories].forEach((category) => {
-        if (category.id && category.name) byId.set(category.id, category);
-    });
-    return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
-}
-
-async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
-    const references = await Promise.all(
-        (log.references || []).map(async (item) => ({
-            ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
-        })),
-    );
-    const images = await Promise.all(
-        (log.images || []).map(async (item) => {
-            const dataUrl = await resolveImageUrl(item.storageKey, item.dataUrl);
-            return { ...item, dataUrl };
-        }),
-    );
-    const visibleImages = images.filter((image) => Boolean(image.dataUrl));
-    if (typeof window !== "undefined") warmImageThumbnails(visibleImages);
+async function normalizeLog(log: Partial<GenerationLog>, hydrateSources = false): Promise<GenerationLog> {
+    const references = hydrateSources
+        ? await Promise.all(
+              (log.references || []).map(async (item) => ({
+                  ...item,
+                  dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
+              })),
+          )
+        : log.references || [];
+    const images = hydrateSources
+        ? await Promise.all(
+              (log.images || []).map(async (item) => ({
+                  ...item,
+                  dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
+              })),
+          )
+        : log.images || [];
+    const visibleImages = images.filter((image) => Boolean(image.dataUrl || image.storageKey));
     const config = normalizeLogConfig(log);
     return {
         id: log.id || nanoid(),
@@ -2262,21 +2364,98 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     };
 }
 
+function filterImageHistoryIndex(index: ImageHistoryIndexEntry[], mode: ResultViewMode, activeCategoryId: string | null) {
+    if (mode === "all") return index;
+    if (activeCategoryId) return index.filter((entry) => entry.categoryIds.includes(activeCategoryId));
+    return index.filter((entry) => !entry.categoryIds.length);
+}
+
 function HistoryThumbnail({ image, alt, preview = false }: { image: GeneratedImage; alt: string; preview?: boolean }) {
-    const [src, setSrc] = useState(image.dataUrl);
+    return <LazyHistoryImage image={image} alt={alt} preview={preview} className={preview ? "block size-full" : "size-8 shrink-0 rounded border border-white/80 shadow-sm dark:border-stone-900/80"} />;
+}
+
+function LazyHistoryImage({
+    image,
+    alt,
+    preview = false,
+    className = "",
+    style,
+}: {
+    image: ImageHistoryIndexImage;
+    alt: string;
+    preview?: boolean;
+    className?: string;
+    style?: CSSProperties;
+}) {
+    const rootRef = useRef<HTMLSpanElement>(null);
+    const [visible, setVisible] = useState(false);
+    const [src, setSrc] = useState("");
+    const [originalSrc, setOriginalSrc] = useState("");
+
     useEffect(() => {
+        const element = rootRef.current;
+        if (!element) return;
+        if (typeof IntersectionObserver === "undefined") {
+            setVisible(true);
+            return;
+        }
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (!entries.some((entry) => entry.isIntersecting)) return;
+                setVisible(true);
+                observer.disconnect();
+            },
+            { rootMargin: "400px" },
+        );
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, []);
+
+    useEffect(() => {
+        if (!visible) return;
         let active = true;
-        void getImageThumbnail(image.storageKey || image.id, image.dataUrl)
-            .then((value) => {
-                if (active && value) setSrc(value);
+        void resolveImageUrl(image.storageKey, image.dataUrl)
+            .then(async (source) => {
+                if (!source || !active) return;
+                setOriginalSrc(source);
+                setSrc(source);
+                if (!canCreateClientThumbnail(source)) return;
+                const thumbnail = await getImageThumbnail(image.storageKey || image.id, source).catch(() => "");
+                if (active && thumbnail) setSrc(thumbnail);
             })
-            .catch(() => {});
+            .catch(() => {
+                if (active && image.dataUrl) {
+                    setOriginalSrc(image.dataUrl);
+                    setSrc(image.dataUrl);
+                }
+            });
         return () => {
             active = false;
         };
-    }, [image.dataUrl, image.id, image.storageKey]);
-    if (preview) return <Image src={src} preview={{ src: image.dataUrl }} alt={alt} className="aspect-[4/3] object-cover" />;
-    return <img src={src} alt={alt} className="size-8 shrink-0 rounded border border-white/80 object-cover shadow-sm dark:border-stone-900/80" />;
+    }, [image.dataUrl, image.id, image.storageKey, visible]);
+
+    return (
+        <span ref={rootRef} className={`block overflow-hidden bg-stone-100 dark:bg-stone-900 ${className}`} style={style}>
+            {src ? (
+                preview ? (
+                    <Image rootClassName="!block !size-full" src={src} preview={originalSrc ? { src: originalSrc } : false} alt={alt} className="!size-full object-cover" />
+                ) : (
+                    <img src={src} alt={alt} loading="lazy" decoding="async" className="size-full object-cover" />
+                )
+            ) : (
+                <span className="block size-full animate-pulse bg-stone-200/80 dark:bg-stone-800/80" />
+            )}
+        </span>
+    );
+}
+
+function canCreateClientThumbnail(source: string) {
+    if (source.startsWith("blob:") || source.startsWith("data:")) return true;
+    try {
+        return new URL(source, window.location.href).origin === window.location.origin;
+    } catch {
+        return false;
+    }
 }
 
 function serializeLog(log: GenerationLog): GenerationLog {

@@ -4,6 +4,7 @@ import { useCanvasStore, mergeCanvasProjects } from "@/app/(user)/canvas/stores/
 import { useAssetStore, mergeAssets } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { fetchUserConfig, syncUserCanvasData, syncUserAssetData, syncUserImageHistory } from "./api/user-config";
+import { putImageHistoryCategories, replaceImageHistoryLogs } from "./image-history-storage";
 
 export async function checkLocalAssetsExist(): Promise<boolean> {
     const imageStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
@@ -145,11 +146,7 @@ export async function migrateLocalAssetsToCloud(
             const nextLogsData = JSON.parse(replacedLogsStr);
             
             // Save locally
-            await imageLogStore.clear();
-            await Promise.all(
-                nextLogsData.logs.map((log: any) => imageLogStore.setItem(log.id, log))
-            );
-            await imageCategoryStore.setItem("infinite-canvas:image_generation_categories", nextLogsData.categories);
+            await Promise.all([replaceImageHistoryLogs(nextLogsData.logs), putImageHistoryCategories(nextLogsData.categories)]);
 
             // Sync to server
             await syncUserImageHistory(token, { logs: nextLogsData.logs, categories: nextLogsData.categories });

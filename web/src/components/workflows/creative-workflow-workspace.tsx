@@ -14,6 +14,7 @@ import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { deleteUserWorkflow, draftUserWorkflow, fetchUserConfig, fetchUserWorkflows, saveUserWorkflow, type CreativeWorkflowRecord } from "@/services/api/user-config";
+import { putImageHistoryLog } from "@/services/image-history-storage";
 import { deleteStoredImages, imageToDataUrl, uploadImage } from "@/services/image-storage";
 import { defaultConfig, localChannelForActiveModel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -182,7 +183,6 @@ const WORKFLOW_STORE_KEY = "infinite-canvas:creative-workflows";
 const SERIES_DRAFT_STORE_PREFIX = "infinite-canvas:series-drafts:";
 const CATEGORY_STORE_KEY = "infinite-canvas:image_generation_categories";
 const workflowStore = localforage.createInstance({ name: "infinite-canvas", storeName: "creative_workflows" });
-const imageLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
 const categoryStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_categories" });
 
 const variableTypeOptions: Array<{ value: WorkflowVariableType; label: string }> = [
@@ -783,7 +783,7 @@ export function CreativeWorkflowWorkspace({
                 seriesTitle,
                 seriesIndex,
             });
-            await imageLogStore.setItem(log.id, serializeHistoryLog(log));
+            await putImageHistoryLog(serializeHistoryLog(log));
             onGenerationLogSaved?.();
             const finishedAt = Date.now();
             setWorkflows((value) => {
